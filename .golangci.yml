@@ -158,7 +158,7 @@ linters:
         - name: line-length-limit
           arguments: [120]
         - name: max-public-structs
-          arguments: [6]
+          arguments: [7]
         - name: modifies-parameter
         - name: modifies-value-receiver
         - name: package-comments

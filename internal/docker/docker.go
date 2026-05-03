@@ -1,0 +1,452 @@
+// Package docker manages docker operations.
+package docker
+
+import (
+	"context"
+	goerrors "errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"text/template"
+
+	"github.com/containerd/errdefs"
+	imageapi "github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/client"
+
+	"github.com/future-cyborg/udocker/internal/config"
+	"github.com/future-cyborg/udocker/internal/errors"
+	"github.com/future-cyborg/udocker/internal/logger"
+)
+
+const (
+	dockerCmd    = "docker"
+	dockerRunCmd = "run"
+)
+
+var errNoTemplates = goerrors.New("no templates specified")
+
+var (
+	errInvalidImageRef = goerrors.New("invalid image reference")
+	validImageRef      = regexp.MustCompile(`^[a-zA-Z0-9._\-/:@]+$`)
+)
+
+func validateImageRef(image string) error {
+	if image == "" || !validImageRef.MatchString(image) {
+		return errors.Wrap(errInvalidImageRef)
+	}
+
+	return nil
+}
+
+type templateBuild struct {
+	conf      *config.Config
+	name      string
+	fromTag   string
+	resultTag string
+	buildArgs []string
+}
+
+func newDockerClient() (*client.Client, error) {
+	cli, err := client.New(client.FromEnv)
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	return cli, nil
+}
+
+// Build builds the user layer on top of the image.
+func Build(image string, buildArgs []string) (retErr error) {
+	if err := validateImageRef(image); err != nil {
+		return err
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	if len(conf.Build.Templates) == 0 {
+		return errors.Wrap(errNoTemplates)
+	}
+
+	cli, err := newDockerClient()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	defer func() { _ = cli.Close() }()
+
+	finalTag, intermediateTags, err := buildTemplates(conf, image, buildArgs)
+	// Intermediate tags are temporary stepping-stone images created during the
+	// build pipeline. They are safe to remove on both success and failure: on
+	// success the final image has already been retagged, and on failure the
+	// partial intermediates are no longer needed.
+	defer func() {
+		if cleanupErr := cleanupTags(cli, intermediateTags); cleanupErr != nil {
+			retErr = errors.Join(retErr, cleanupErr)
+		}
+	}()
+
+	if err != nil {
+		return err
+	}
+
+	return tagImage(cli, finalTag, newImageName(image, conf.Defaults.Suffix))
+}
+
+func buildTemplates(
+	conf *config.Config, image string, buildArgs []string,
+) (finalTag string, intermediateTags []string, err error) {
+	fromTag := image
+
+	for i, templateName := range conf.Build.Templates {
+		resultTag := newImageName(image, conf.Defaults.Suffix+"."+strconv.Itoa(i))
+		intermediateTags = append(intermediateTags, resultTag)
+
+		t := &templateBuild{
+			conf: conf, name: templateName,
+			fromTag: fromTag, resultTag: resultTag,
+			buildArgs: buildArgs,
+		}
+
+		if err := buildTemplate(t); err != nil {
+			return "", intermediateTags, errors.Wrap(err)
+		}
+
+		fromTag = resultTag
+	}
+
+	return fromTag, intermediateTags, nil
+}
+
+func tagImage(cli *client.Client, from, to string) error {
+	ctx := context.Background()
+
+	_, err := cli.ImageTag(ctx, client.ImageTagOptions{
+		Source: from,
+		Target: to,
+	})
+
+	return errors.Wrap(err)
+}
+
+// Run runs the user layer on top of the image. Builds it if it doesn't exist.
+func Run(image string, runArgs []string) error {
+	if err := validateImageRef(image); err != nil {
+		return err
+	}
+
+	conf, err := config.LoadConfigNoArgs()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	cli, err := newDockerClient()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	defer func() { _ = cli.Close() }()
+
+	newImage := newImageName(image, conf.Defaults.Suffix)
+
+	if err := ensureImageExists(cli, image, newImage); err != nil {
+		return err
+	}
+
+	command := runCommand(newImage, conf.Run.Args, runArgs)
+	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
+
+	return execCommand(command)
+}
+
+func ensureImageExists(cli *client.Client, image, newImage string) error {
+	exists, err := imageExists(cli, newImage)
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	if !exists {
+		logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
+
+		if err = Build(image, nil); err != nil {
+			return errors.Wrap(err)
+		}
+	}
+
+	return nil
+}
+
+func execCommand(command []string) error {
+	ctx := context.Background()
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // trusted config
+	cmd.Env = os.Environ()
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	return errors.Wrap(cmd.Run())
+}
+
+// Clean removes all images made by this program.
+//
+//nolint:revive // flag-parameter is the clearest API here
+func Clean(dryRun bool) error {
+	ctx := context.Background()
+
+	cli, err := newDockerClient()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	defer func() { _ = cli.Close() }()
+
+	imageItems, err := listUdockerImages(ctx, cli)
+	if err != nil {
+		return err
+	}
+
+	if dryRun {
+		logger.PrintColor(logger.Cyan, "Would remove:")
+	} else {
+		logger.PrintColor(logger.Cyan, "Removing:")
+	}
+
+	var allErr error
+
+	for item := range imageItems {
+		err = cleanImage(ctx, cli, &imageItems[item], dryRun)
+		if err != nil {
+			allErr = errors.Join(allErr, err)
+		}
+	}
+
+	if allErr != nil {
+		return errors.Wrap(allErr)
+	}
+
+	return nil
+}
+
+func listUdockerImages(ctx context.Context, cli *client.Client) ([]imageapi.Summary, error) {
+	f := client.Filters{"label": {"com.udocker": true}}
+	imageList, err := cli.ImageList(ctx, client.ImageListOptions{Filters: f})
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	return imageList.Items, nil
+}
+
+// List prints all images managed by udocker.
+func List() error {
+	ctx := context.Background()
+
+	cli, err := newDockerClient()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	defer func() { _ = cli.Close() }()
+
+	images, err := listUdockerImages(ctx, cli)
+	if err != nil {
+		return err
+	}
+
+	for i := range images {
+		if len(images[i].RepoTags) > 0 {
+			for _, tag := range images[i].RepoTags {
+				logger.PrintColor(logger.Cyan, tag)
+			}
+		} else {
+			logger.PrintColor(logger.Cyan, images[i].ID)
+		}
+	}
+
+	return nil
+}
+
+//nolint:revive // flag-parameter is the clearest API here
+func cleanImage(ctx context.Context, cli *client.Client, image *imageapi.Summary, dryRun bool) error {
+	if !dryRun {
+		_, err := cli.ImageRemove(ctx, image.ID, client.ImageRemoveOptions{})
+		if err != nil {
+			return errors.Wrap(err)
+		}
+	}
+
+	if len(image.RepoTags) > 0 {
+		logger.PrintColor(logger.Cyan, image.RepoTags[0])
+	} else {
+		logger.PrintColor(logger.Cyan, image.ID)
+	}
+
+	return nil
+}
+
+func buildTemplate(t *templateBuild) error {
+	tmpFile, contextDir, err := writeTemplateFile(t.name, t.fromTag)
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	defer func() { _ = os.Remove(tmpFile) }()
+
+	command := []string{
+		dockerCmd, "build",
+		"--label", "com.udocker=true",
+		"-t", t.resultTag,
+		"-f", tmpFile,
+	}
+
+	command = append(command, buildArgsFromConfig(t.conf)...)
+	command = append(command, t.buildArgs...)
+	command = append(command, contextDir)
+
+	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
+
+	ctx := context.Background()
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // trusted config
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return errors.Wrap(cmd.Run())
+}
+
+func writeTemplateFile(templateName, fromTag string) (tempFile, contextDir string, err error) {
+	configFiles, err := config.GetConfigPaths()
+	if err != nil {
+		return "", "", errors.Wrap(err)
+	}
+
+	tmplFile := filepath.Join(configFiles.TemplatesDir, templateName+".dockerfile")
+	if _, err = os.Stat(tmplFile); err != nil {
+		return "", "", errors.Wrap(err)
+	}
+
+	tmpl, err := template.ParseFiles(tmplFile)
+	if err != nil {
+		return "", "", errors.Wrap(err)
+	}
+
+	outFile, err := executeTemplate(tmpl, templateName, fromTag)
+	if err != nil {
+		return "", "", err
+	}
+
+	contextDir = filepath.Join(configFiles.TemplatesDir, templateName)
+	if _, err := os.Stat(contextDir); err != nil {
+		if !os.IsNotExist(err) {
+			return "", "", errors.Wrap(err)
+		}
+
+		contextDir = configFiles.TemplatesDir
+	}
+
+	return outFile, contextDir, nil
+}
+
+func executeTemplate(tmpl *template.Template, templateName, fromTag string) (string, error) {
+	tmpName := fmt.Sprintf("%s.*.dockerfile", templateName)
+
+	tmpFile, err := os.CreateTemp("", tmpName)
+	if err != nil {
+		return "", errors.Wrap(err)
+	}
+
+	err = tmpl.Execute(tmpFile, map[string]interface{}{
+		"image": fromTag,
+	})
+	if err != nil {
+		_ = tmpFile.Close()
+
+		return "", errors.Wrap(err)
+	}
+
+	if err = tmpFile.Close(); err != nil {
+		return "", errors.Wrap(err)
+	}
+
+	return tmpFile.Name(), nil
+}
+
+func cleanupTags(cli *client.Client, tags []string) error {
+	ctx := context.Background()
+
+	var allErr error
+
+	for _, tag := range tags {
+		logger.PrintColorF(logger.Yellow, "Removing image %s", tag)
+
+		_, err := cli.ImageRemove(ctx, tag, client.ImageRemoveOptions{})
+		if err != nil {
+			logger.PrintColorFErr(logger.Red, "Failed to remove image: %s", tag)
+			allErr = errors.Join(allErr, errors.Wrap(err))
+		}
+	}
+
+	return allErr
+}
+
+func newImageName(image, imageTemplate string) string {
+	// Strip digest if present (e.g. ubuntu:22.04@sha256:abc... → ubuntu:22.04).
+	// Digests cannot be used as tag targets, but the tag portion (if any) is preserved.
+	if atIdx := strings.Index(image, "@"); atIdx != -1 {
+		image = image[:atIdx]
+	}
+
+	// Find the last ':' that is not part of a registry host (i.e., after any '/')
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+
+	if lastColon <= lastSlash {
+		return fmt.Sprintf("%s-%s:latest", image, imageTemplate)
+	}
+
+	return fmt.Sprintf("%s-%s:%s", image[:lastColon], imageTemplate, image[lastColon+1:])
+}
+
+func buildArgsFromConfig(conf *config.Config) []string {
+	var buildArgs []string
+	for _, arg := range conf.Build.Args {
+		buildArgs = append(buildArgs, "--build-arg", fmt.Sprintf("%s=%s", arg.Key, arg.Value))
+	}
+
+	return buildArgs
+}
+
+func imageExists(cli *client.Client, image string) (bool, error) {
+	ctx := context.Background()
+
+	_, err := cli.ImageInspect(ctx, image)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return false, nil
+		}
+
+		return false, errors.Wrap(err)
+	}
+
+	return true, nil
+}
+
+func runCommand(image string, runArgs ...[]string) []string {
+	command := []string{
+		dockerCmd, dockerRunCmd,
+	}
+
+	for _, arg := range runArgs {
+		command = append(command, arg...)
+	}
+
+	command = append(command, image)
+
+	return command
+}

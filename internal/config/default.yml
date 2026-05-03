@@ -1,0 +1,9 @@
+defaults:
+  suffix: udocker
+
+build:
+  templates: []
+  args: []
+
+run:
+  args: []

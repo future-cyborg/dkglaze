@@ -65,7 +65,7 @@ GO_PKGS            := $(foreach P,$(patsubst %/,%,$(dir $(wildcard $(MAKEFILE_DI
 
 # PLATFORMS lists all supported platforms - MUST NOT CONTAIN DASHES (-)
 PLATFORMS          := linux/x86_64 linux/arm64
-LOCAL_PLATFORM     := linux/x86_64
+LOCAL_PLATFORM     := $(shell uname -s | tr '[:upper:]' '[:lower:]')/$(shell uname -m | sed 's/aarch64/arm64/')
 
 noop=
 space = $(noop) $(noop)
@@ -339,3 +339,16 @@ tag/bump-minor-and-push: .enforce-default-branch .enforce-updated-branch
 tag/bump-patch-and-push: .enforce-default-branch .enforce-updated-branch
 	git tag -a "${SEMVER_PATCH_BUMP}" -m "${SEMVER_PATCH_BUMP}"
 	git push origin "${SEMVER_PATCH_BUMP}"
+
+
+#################
+# build & install
+#################
+
+.PHONY: build
+build: bin/$(LOCAL_PLATFORM)/udocker
+
+.PHONY: install
+install:
+	cp $(MAKEFILE_DIR)bin/$(LOCAL_PLATFORM)/udocker $(HOME)/.local/bin/udocker
+

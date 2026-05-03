@@ -1,0 +1,94 @@
+{
+    "title": "udocker config",
+    "description": "Configuration for udocker",
+    "type": "object",
+    "properties":
+    {
+        "defaults":
+        {
+            "type": "object",
+            "properties":
+            {
+                "suffix":
+                {
+                    "type": "string"
+                }
+            },
+            "required": ["suffix"],
+            "additionalProperties": false
+        },
+        "build":
+        {
+            "type": "object",
+            "properties":
+            {
+                "templates":
+                {
+                    "type": "array",
+                    "items":
+                    {
+                        "type": "string"
+                    }
+                },
+                "args":
+                {
+                    "type": "array",
+                    "items":
+                    {
+                        "type": "object",
+                        "oneOf": [
+                        {
+                            "properties":
+                            {
+                                "key":
+                                {
+                                    "type": "string"
+                                },
+                                "value":
+                                {
+                                    "type": "string"
+                                }
+                            },
+                            "required": ["key", "value"],
+                            "additionalProperties": false
+                        },
+                        {
+                            "properties":
+                            {
+                                "key":
+                                {
+                                    "type": "string"
+                                },
+                                "cmd":
+                                {
+                                    "type": "string"
+                                }
+                            },
+                            "required": ["key", "cmd"],
+                            "additionalProperties": false
+                        }]
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
+        "run":
+        {
+            "type": "object",
+            "properties":
+            {
+                "args":
+                {
+                    "type": "array",
+                    "items":
+                    {
+                        "type": "string"
+                    }
+                }
+            },
+            "additionalProperties": false
+        }
+    },
+    "required": ["defaults"],
+    "additionalProperties": false
+}
