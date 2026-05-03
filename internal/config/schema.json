@@ -12,81 +12,126 @@
                 "suffix":
                 {
                     "type": "string"
+                },
+                "profile":
+                {
+                    "type": "string"
                 }
             },
-            "required": ["suffix"],
+            "required": ["suffix", "profile"],
             "additionalProperties": false
         },
-        "build":
+        "features":
         {
             "type": "object",
-            "properties":
+            "additionalProperties":
             {
-                "templates":
+                "type": "object",
+                "properties":
                 {
-                    "type": "array",
-                    "items":
-                    {
-                        "type": "string"
-                    }
-                },
-                "args":
-                {
-                    "type": "array",
-                    "items":
+                    "build":
                     {
                         "type": "object",
-                        "oneOf": [
+                        "properties":
                         {
-                            "properties":
+                            "templates":
                             {
-                                "key":
-                                {
-                                    "type": "string"
-                                },
-                                "value":
+                                "type": "array",
+                                "items":
                                 {
                                     "type": "string"
                                 }
                             },
-                            "required": ["key", "value"],
-                            "additionalProperties": false
+                            "args":
+                            {
+                                "type": "array",
+                                "items":
+                                {
+                                    "type": "object",
+                                    "oneOf": [
+                                    {
+                                        "properties":
+                                        {
+                                            "key":
+                                            {
+                                                "type": "string"
+                                            },
+                                            "value":
+                                            {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "required": ["key", "value"],
+                                        "additionalProperties": false
+                                    },
+                                    {
+                                        "properties":
+                                        {
+                                            "key":
+                                            {
+                                                "type": "string"
+                                            },
+                                            "cmd":
+                                            {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "required": ["key", "cmd"],
+                                        "additionalProperties": false
+                                    }]
+                                }
+                            }
                         },
+                        "additionalProperties": false
+                    },
+                    "run":
+                    {
+                        "type": "object",
+                        "properties":
                         {
-                            "properties":
+                            "args":
                             {
-                                "key":
-                                {
-                                    "type": "string"
-                                },
-                                "cmd":
+                                "type": "array",
+                                "items":
                                 {
                                     "type": "string"
                                 }
                             },
-                            "required": ["key", "cmd"],
-                            "additionalProperties": false
-                        }]
+                            "mounts":
+                            {
+                                "type": "array",
+                                "items":
+                                {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "additionalProperties": false
                     }
-                }
-            },
-            "additionalProperties": false
+                },
+                "additionalProperties": false
+            }
         },
-        "run":
+        "profiles":
         {
             "type": "object",
-            "properties":
+            "additionalProperties":
             {
-                "args":
+                "type": "object",
+                "properties":
                 {
-                    "type": "array",
-                    "items":
+                    "features":
                     {
-                        "type": "string"
+                        "type": "array",
+                        "items":
+                        {
+                            "type": "string"
+                        }
                     }
-                }
-            },
-            "additionalProperties": false
+                },
+                "required": ["features"],
+                "additionalProperties": false
+            }
         }
     },
     "required": ["defaults"],

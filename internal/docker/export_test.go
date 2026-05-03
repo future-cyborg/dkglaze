@@ -10,8 +10,12 @@ func ExportedRunCommand(image string, runArgs ...[]string) []string {
 	return runCommand(image, runArgs...)
 }
 
-func ExportedBuildArgsFromConfig(conf *config.Config) []string {
-	return buildArgsFromConfig(conf)
+func ExportedBuildArgsFromResolved(resolved *config.ResolvedConfig) []string {
+	return buildArgsFromResolved(resolved)
+}
+
+func ExportedMountFlagsFromResolved(resolved *config.ResolvedConfig) []string {
+	return mountFlagsFromResolved(resolved)
 }
 
 func ExportedWriteTemplateFile(templateName, fromTag string) (tempFile, contextDir string, err error) {

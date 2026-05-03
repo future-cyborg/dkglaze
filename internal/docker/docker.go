@@ -43,7 +43,7 @@ func validateImageRef(image string) error {
 }
 
 type templateBuild struct {
-	conf      *config.Config
+	resolved  *config.ResolvedConfig
 	name      string
 	fromTag   string
 	resultTag string
@@ -60,17 +60,17 @@ func newDockerClient() (*client.Client, error) {
 }
 
 // Build builds the user layer on top of the image.
-func Build(image string, buildArgs []string) (retErr error) {
+func Build(image string, buildArgs []string, profile string) (retErr error) {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
 
-	conf, err := config.LoadConfig()
+	resolved, err := loadResolved(profile)
 	if err != nil {
-		return errors.Wrap(err)
+		return err
 	}
 
-	if len(conf.Build.Templates) == 0 {
+	if len(resolved.Build.Templates) == 0 {
 		return errors.Wrap(errNoTemplates)
 	}
 
@@ -81,7 +81,7 @@ func Build(image string, buildArgs []string) (retErr error) {
 
 	defer func() { _ = cli.Close() }()
 
-	finalTag, intermediateTags, err := buildTemplates(conf, image, buildArgs)
+	finalTag, intermediateTags, err := buildTemplates(resolved, image, buildArgs)
 	// Intermediate tags are temporary stepping-stone images created during the
 	// build pipeline. They are safe to remove on both success and failure: on
 	// success the final image has already been retagged, and on failure the
@@ -96,20 +96,58 @@ func Build(image string, buildArgs []string) (retErr error) {
 		return err
 	}
 
-	return tagImage(cli, finalTag, newImageName(image, conf.Defaults.Suffix))
+	return tagImage(cli, finalTag, newImageName(image, resolved.Suffix))
+}
+
+func loadResolved(profile string) (*config.ResolvedConfig, error) {
+	conf, err := config.LoadConfig()
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	activeProfile := conf.Defaults.Profile
+	if profile != "" {
+		activeProfile = profile
+	}
+
+	resolved, err := conf.ResolveProfile(activeProfile)
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	return resolved, nil
+}
+
+func loadResolvedNoArgs(profile string) (*config.ResolvedConfig, error) {
+	conf, err := config.LoadConfig()
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	activeProfile := conf.Defaults.Profile
+	if profile != "" {
+		activeProfile = profile
+	}
+
+	resolved, err := conf.ResolveProfileNoArgs(activeProfile)
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	return resolved, nil
 }
 
 func buildTemplates(
-	conf *config.Config, image string, buildArgs []string,
+	resolved *config.ResolvedConfig, image string, buildArgs []string,
 ) (finalTag string, intermediateTags []string, err error) {
 	fromTag := image
 
-	for i, templateName := range conf.Build.Templates {
-		resultTag := newImageName(image, conf.Defaults.Suffix+"."+strconv.Itoa(i))
+	for i, templateName := range resolved.Build.Templates {
+		resultTag := newImageName(image, resolved.Suffix+"."+strconv.Itoa(i))
 		intermediateTags = append(intermediateTags, resultTag)
 
 		t := &templateBuild{
-			conf: conf, name: templateName,
+			resolved: resolved, name: templateName,
 			fromTag: fromTag, resultTag: resultTag,
 			buildArgs: buildArgs,
 		}
@@ -136,14 +174,14 @@ func tagImage(cli *client.Client, from, to string) error {
 }
 
 // Run runs the user layer on top of the image. Builds it if it doesn't exist.
-func Run(image string, runArgs []string) error {
+func Run(image string, runArgs []string, profile string) error {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
 
-	conf, err := config.LoadConfigNoArgs()
+	resolved, err := loadResolvedNoArgs(profile)
 	if err != nil {
-		return errors.Wrap(err)
+		return err
 	}
 
 	cli, err := newDockerClient()
@@ -153,19 +191,19 @@ func Run(image string, runArgs []string) error {
 
 	defer func() { _ = cli.Close() }()
 
-	newImage := newImageName(image, conf.Defaults.Suffix)
+	newImage := newImageName(image, resolved.Suffix)
 
-	if err := ensureImageExists(cli, image, newImage); err != nil {
+	if err := ensureImageExists(cli, image, newImage, profile); err != nil {
 		return err
 	}
 
-	command := runCommand(newImage, conf.Run.Args, runArgs)
+	command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs)
 	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
 
 	return execCommand(command)
 }
 
-func ensureImageExists(cli *client.Client, image, newImage string) error {
+func ensureImageExists(cli *client.Client, image, newImage, profile string) error {
 	exists, err := imageExists(cli, newImage)
 	if err != nil {
 		return errors.Wrap(err)
@@ -174,7 +212,7 @@ func ensureImageExists(cli *client.Client, image, newImage string) error {
 	if !exists {
 		logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
 
-		if err = Build(image, nil); err != nil {
+		if err = Build(image, nil, profile); err != nil {
 			return errors.Wrap(err)
 		}
 	}
@@ -305,7 +343,7 @@ func buildTemplate(t *templateBuild) error {
 		"-f", tmpFile,
 	}
 
-	command = append(command, buildArgsFromConfig(t.conf)...)
+	command = append(command, buildArgsFromResolved(t.resolved)...)
 	command = append(command, t.buildArgs...)
 	command = append(command, contextDir)
 
@@ -413,13 +451,22 @@ func newImageName(image, imageTemplate string) string {
 	return fmt.Sprintf("%s-%s:%s", image[:lastColon], imageTemplate, image[lastColon+1:])
 }
 
-func buildArgsFromConfig(conf *config.Config) []string {
+func buildArgsFromResolved(resolved *config.ResolvedConfig) []string {
 	var buildArgs []string
-	for _, arg := range conf.Build.Args {
+	for _, arg := range resolved.Build.Args {
 		buildArgs = append(buildArgs, "--build-arg", fmt.Sprintf("%s=%s", arg.Key, arg.Value))
 	}
 
 	return buildArgs
+}
+
+func mountFlagsFromResolved(resolved *config.ResolvedConfig) []string {
+	var flags []string
+	for _, mount := range resolved.Run.Mounts {
+		flags = append(flags, "--volume", mount)
+	}
+
+	return flags
 }
 
 func imageExists(cli *client.Client, image string) (bool, error) {

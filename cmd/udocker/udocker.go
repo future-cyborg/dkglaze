@@ -29,6 +29,7 @@ func (*InitCmd) Run(_ *Context) error {
 type BuildCmd struct {
 	Image     string   `arg:"" name:"image" help:"Image to build FROM"`
 	BuildArgs []string `arg:"" optional:"" name:"build-args" help:"Build arguments passed to docker build."`
+	Profile   string   `short:"p" name:"profile" help:"Profile to activate (overrides defaults.profile)."`
 }
 
 func (*BuildCmd) Help() string {
@@ -36,13 +37,14 @@ func (*BuildCmd) Help() string {
 }
 
 func (cmd *BuildCmd) Run(_ *Context) error {
-	return errors.Wrap(docker.Build(cmd.Image, cmd.BuildArgs))
+	return errors.Wrap(docker.Build(cmd.Image, cmd.BuildArgs, cmd.Profile))
 }
 
 // RunCmd is the run subcommand.
 type RunCmd struct {
 	Image   string   `arg:"" name:"image" help:"Image to run user-layer on top of"`
 	RunArgs []string `arg:"" optional:"" name:"args" help:"Arguments passed to docker run"`
+	Profile string   `short:"p" name:"profile" help:"Profile to activate (overrides defaults.profile)."`
 }
 
 func (*RunCmd) Help() string {
@@ -50,7 +52,7 @@ func (*RunCmd) Help() string {
 }
 
 func (cmd *RunCmd) Run(_ *Context) error {
-	return errors.Wrap(docker.Run(cmd.Image, cmd.RunArgs))
+	return errors.Wrap(docker.Run(cmd.Image, cmd.RunArgs, cmd.Profile))
 }
 
 // CleanCmd is the clean subcommand.

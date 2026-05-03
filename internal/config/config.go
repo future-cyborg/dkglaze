@@ -1,5 +1,5 @@
 // Package config provides configuration utilities.
-package config
+package config //nolint:revive // max-public-structs: this package intentionally exports all config types
 
 import (
 	"bytes"
@@ -30,21 +30,36 @@ var (
 	errRunArgCommand     = goerrors.New("failed to run command for arg")
 	errBothValueAndCmd   = goerrors.New("arg cannot have both value and cmd set")
 	errMissingValueOrCmd = goerrors.New("arg must have either value or cmd set")
+	errUnknownProfile    = goerrors.New("unknown profile")
+	errUnknownFeature    = goerrors.New("unknown feature")
+	errDefaultProfile    = goerrors.New("defaults.profile references unknown profile")
 )
 
 // Config represents the configuration.
 type Config struct {
-	Defaults Defaults `yaml:"defaults"`
-	Build    Build    `yaml:"build"`
-	Run      Run      `yaml:"run"`
+	Defaults Defaults           `yaml:"defaults"`
+	Features map[string]Feature `yaml:"features"`
+	Profiles map[string]Profile `yaml:"profiles"`
 }
 
 // Defaults represents configuration for the default values.
 type Defaults struct {
-	Suffix string `yaml:"suffix"`
+	Suffix  string `yaml:"suffix"`
+	Profile string `yaml:"profile"`
 }
 
-// Build represents configuration for the build command.
+// Feature represents a named bundle of build and run configuration.
+type Feature struct {
+	Build Build `yaml:"build"`
+	Run   Run   `yaml:"run"`
+}
+
+// Profile represents a named combination of features.
+type Profile struct {
+	Features []string `yaml:"features"`
+}
+
+// Build represents build configuration.
 type Build struct {
 	Templates []string   `yaml:"templates"`
 	Args      []BuildArg `yaml:"args"`
@@ -57,9 +72,17 @@ type BuildArg struct {
 	Cmd   string `yaml:"cmd"`
 }
 
-// Run represents configuration for the run command.
+// Run represents run configuration.
 type Run struct {
-	Args []string `yaml:"args"`
+	Args   []string `yaml:"args"`
+	Mounts []string `yaml:"mounts"`
+}
+
+// ResolvedConfig is the flat, merged result of applying a profile.
+type ResolvedConfig struct {
+	Suffix string
+	Build  Build
+	Run    Run
 }
 
 // Paths represents the config files and directories.
@@ -103,24 +126,18 @@ func InitConfig() error {
 	return nil
 }
 
-// LoadConfig loads the config file and evaluates all cmd-type build args.
+// LoadConfig loads and validates the config file.
 func LoadConfig() (*Config, error) {
 	cfg, err := unmarshalConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	if err = cfg.populateArgs(); err != nil {
-		return nil, errors.Wrap(err)
+	if _, ok := cfg.Profiles[cfg.Defaults.Profile]; !ok {
+		return nil, errors.Wrap(fmt.Errorf("%w: %q", errDefaultProfile, cfg.Defaults.Profile))
 	}
 
 	return cfg, nil
-}
-
-// LoadConfigNoArgs loads the config file without evaluating cmd-type build args.
-// Use this when build args are not needed (e.g. the run command).
-func LoadConfigNoArgs() (*Config, error) {
-	return unmarshalConfig()
 }
 
 func unmarshalConfig() (*Config, error) {
@@ -181,9 +198,82 @@ func GetConfigPaths() (Paths, error) {
 	}, nil
 }
 
-func (conf *Config) populateArgs() error {
-	for i := range conf.Build.Args {
-		if err := populateArg(&conf.Build.Args[i]); err != nil {
+// ResolveProfile merges the named profile's features in order and evaluates
+// cmd-type build args. Use ResolveProfileNoArgs when build args are not needed.
+func (conf *Config) ResolveProfile(name string) (*ResolvedConfig, error) {
+	resolved, err := conf.mergeProfile(name)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = resolved.populateArgs(); err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	return resolved, nil
+}
+
+// ResolveProfileNoArgs merges the named profile's features without evaluating
+// cmd-type build args. Use this for the run command.
+func (conf *Config) ResolveProfileNoArgs(name string) (*ResolvedConfig, error) {
+	return conf.mergeProfile(name)
+}
+
+func (conf *Config) mergeProfile(name string) (*ResolvedConfig, error) {
+	profile, ok := conf.Profiles[name]
+	if !ok {
+		return nil, errors.Wrap(fmt.Errorf("%w: %s", errUnknownProfile, name))
+	}
+
+	resolved := &ResolvedConfig{Suffix: conf.Defaults.Suffix + "-" + name}
+
+	for _, featureName := range profile.Features {
+		feature, ok := conf.Features[featureName]
+		if !ok {
+			return nil, errors.Wrap(fmt.Errorf("%w: %s", errUnknownFeature, featureName))
+		}
+
+		resolved.Build.Templates = append(resolved.Build.Templates, feature.Build.Templates...)
+		resolved.Build.Args = append(resolved.Build.Args, feature.Build.Args...)
+		resolved.Run.Args = append(resolved.Run.Args, feature.Run.Args...)
+		resolved.Run.Mounts = append(resolved.Run.Mounts, expandMounts(feature.Run.Mounts)...)
+	}
+
+	return resolved, nil
+}
+
+func expandMounts(mounts []string) []string {
+	if len(mounts) == 0 {
+		return nil
+	}
+
+	expanded := make([]string, len(mounts))
+
+	for i, m := range mounts {
+		m = os.ExpandEnv(m)
+		m = expandTilde(m)
+		expanded[i] = m
+	}
+
+	return expanded
+}
+
+func expandTilde(path string) string {
+	if !strings.HasPrefix(path, "~/") && path != "~" {
+		return path
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		return path
+	}
+
+	return currentUser.HomeDir + path[1:]
+}
+
+func (resolved *ResolvedConfig) populateArgs() error {
+	for i := range resolved.Build.Args {
+		if err := populateArg(&resolved.Build.Args[i]); err != nil {
 			return err
 		}
 	}

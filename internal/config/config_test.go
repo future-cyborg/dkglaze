@@ -99,77 +99,9 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.Defaults.Suffix == "" {
 		t.Error("expected default suffix to be set")
 	}
-}
 
-func TestLoadConfig_BuildSection(t *testing.T) {
-	cleanup := withTempConfigDir(t)
-	defer cleanup()
-
-	if err := config.InitConfig(); err != nil {
-		t.Fatalf("init error: %v", err)
-	}
-
-	paths, _ := config.GetConfigPaths()
-	customConfig := `defaults:
-  suffix: test
-build:
-  templates:
-    - mytemplate
-  args: []
-run:
-  args: []
-`
-	if err := os.WriteFile(paths.ConfigFile, []byte(customConfig), 0o600); err != nil {
-		t.Fatalf("failed to write config: %v", err)
-	}
-
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if cfg.Defaults.Suffix != "test" {
-		t.Errorf("expected suffix 'test', got '%s'", cfg.Defaults.Suffix)
-	}
-
-	if len(cfg.Build.Templates) != 1 || cfg.Build.Templates[0] != "mytemplate" {
-		t.Errorf("expected templates [mytemplate], got %v", cfg.Build.Templates)
-	}
-}
-
-func TestLoadConfig_PopulatesArgFromCmd(t *testing.T) {
-	cleanup := withTempConfigDir(t)
-	defer cleanup()
-
-	if err := config.InitConfig(); err != nil {
-		t.Fatalf("init error: %v", err)
-	}
-
-	paths, _ := config.GetConfigPaths()
-	customConfig := `defaults:
-  suffix: test
-build:
-  args:
-    - key: MY_ARG
-      cmd: echo hello
-run:
-  args: []
-`
-	if err := os.WriteFile(paths.ConfigFile, []byte(customConfig), 0o600); err != nil {
-		t.Fatalf("failed to write config: %v", err)
-	}
-
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(cfg.Build.Args) != 1 {
-		t.Fatalf("expected 1 build arg, got %d", len(cfg.Build.Args))
-	}
-
-	if cfg.Build.Args[0].Value != "hello" {
-		t.Errorf("expected value 'hello', got '%s'", cfg.Build.Args[0].Value)
+	if cfg.Defaults.Profile == "" {
+		t.Error("expected default profile to be set")
 	}
 }
 
@@ -185,6 +117,7 @@ func TestLoadConfig_InvalidSchema(t *testing.T) {
 	invalidConfig := `defaults:
   unknown_field: bad
   suffix: test
+  profile: default
 `
 	if err := os.WriteFile(paths.ConfigFile, []byte(invalidConfig), 0o600); err != nil {
 		t.Fatalf("failed to write config: %v", err)
@@ -193,5 +126,434 @@ func TestLoadConfig_InvalidSchema(t *testing.T) {
 	_, err := config.LoadConfig()
 	if err == nil {
 		t.Error("expected error for invalid config, got nil")
+	}
+}
+
+func TestLoadConfig_DefaultProfileMissingReturnsError(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: nonexistent
+features:
+  base:
+    build:
+      templates: []
+      args: []
+    run:
+      args: []
+      mounts: []
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	_, err := config.LoadConfig()
+	if err == nil {
+		t.Error("expected error when defaults.profile references unknown profile, got nil")
+	}
+}
+
+// validConfig returns a minimal valid config with a named feature and profile.
+func validConfig(suffix, profile, extraFeatures, extraProfiles string) string {
+	return `defaults:
+  suffix: ` + suffix + `
+  profile: ` + profile + `
+features:
+  base:
+    build:
+      templates: []
+      args: []
+    run:
+      args: []
+      mounts: []
+` + extraFeatures + `
+profiles:
+  default:
+    features:
+      - base
+` + extraProfiles
+}
+
+func TestResolveProfile_BasicFeature(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: default
+features:
+  base:
+    build:
+      templates:
+        - mytemplate
+      args:
+        - key: FOO
+          value: bar
+    run:
+      args:
+        - -it
+        - --rm
+      mounts:
+        - /host:/container
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfile("default")
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Build.Templates) != 1 || resolved.Build.Templates[0] != "mytemplate" {
+		t.Errorf("expected templates [mytemplate], got %v", resolved.Build.Templates)
+	}
+
+	if len(resolved.Build.Args) != 1 || resolved.Build.Args[0].Key != "FOO" || resolved.Build.Args[0].Value != "bar" {
+		t.Errorf("unexpected build args: %v", resolved.Build.Args)
+	}
+
+	if len(resolved.Run.Args) != 2 || resolved.Run.Args[0] != "-it" {
+		t.Errorf("unexpected run args: %v", resolved.Run.Args)
+	}
+
+	if len(resolved.Run.Mounts) != 1 || resolved.Run.Mounts[0] != "/host:/container" {
+		t.Errorf("unexpected mounts: %v", resolved.Run.Mounts)
+	}
+}
+
+func TestResolveProfile_MultipleFeaturesAreMergedInOrder(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: combined
+features:
+  base:
+    build:
+      templates:
+        - base
+      args:
+        - key: A
+          value: "1"
+    run:
+      args:
+        - --rm
+      mounts:
+        - /base:/base
+  tool:
+    build:
+      templates:
+        - tool
+      args:
+        - key: B
+          value: "2"
+    run:
+      args:
+        - -it
+      mounts:
+        - /tool:/tool
+profiles:
+  combined:
+    features:
+      - base
+      - tool
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfile("combined")
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Build.Templates) != 2 ||
+		resolved.Build.Templates[0] != "base" ||
+		resolved.Build.Templates[1] != "tool" {
+		t.Errorf("expected templates [base tool], got %v", resolved.Build.Templates)
+	}
+
+	if len(resolved.Build.Args) != 2 || resolved.Build.Args[0].Key != "A" || resolved.Build.Args[1].Key != "B" {
+		t.Errorf("expected args [A B], got %v", resolved.Build.Args)
+	}
+
+	if len(resolved.Run.Args) != 2 || resolved.Run.Args[0] != "--rm" || resolved.Run.Args[1] != "-it" {
+		t.Errorf("expected run args [--rm -it], got %v", resolved.Run.Args)
+	}
+
+	if len(resolved.Run.Mounts) != 2 ||
+		resolved.Run.Mounts[0] != "/base:/base" ||
+		resolved.Run.Mounts[1] != "/tool:/tool" {
+		t.Errorf("expected mounts [/base:/base /tool:/tool], got %v", resolved.Run.Mounts)
+	}
+}
+
+func TestResolveProfile_UnknownProfileReturnsError(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	_, err = conf.ResolveProfile("nonexistent")
+	if err == nil {
+		t.Error("expected error for unknown profile, got nil")
+	}
+}
+
+func TestResolveProfile_UnknownFeatureReturnsError(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: bad
+features:
+  base:
+    build:
+      templates: []
+      args: []
+    run:
+      args: []
+      mounts: []
+profiles:
+  bad:
+    features:
+      - nonexistent-feature
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	_, err = conf.ResolveProfile("bad")
+	if err == nil {
+		t.Error("expected error for unknown feature, got nil")
+	}
+}
+
+func TestResolveProfile_MountExpandsTilde(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: default
+features:
+  base:
+    build:
+      templates: []
+      args: []
+    run:
+      args: []
+      mounts:
+        - ~/mydir:/container
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfile("default")
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Run.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(resolved.Run.Mounts))
+	}
+
+	if resolved.Run.Mounts[0] == "~/mydir:/container" {
+		t.Error("expected ~ to be expanded, but it was not")
+	}
+}
+
+func TestResolveProfile_MountExpandsEnvVar(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	t.Setenv("MY_HOST_DIR", "/expanded/path")
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: default
+features:
+  base:
+    build:
+      templates: []
+      args: []
+    run:
+      args: []
+      mounts:
+        - $MY_HOST_DIR:/container
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfile("default")
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Run.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(resolved.Run.Mounts))
+	}
+
+	if resolved.Run.Mounts[0] != "/expanded/path:/container" {
+		t.Errorf("expected expanded mount, got %q", resolved.Run.Mounts[0])
+	}
+}
+
+func TestResolveProfile_EvaluatesCmdArg(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: default
+features:
+  base:
+    build:
+      templates: []
+      args:
+        - key: MY_ARG
+          cmd: echo hello
+    run:
+      args: []
+      mounts: []
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfile("default")
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Build.Args) != 1 {
+		t.Fatalf("expected 1 build arg, got %d", len(resolved.Build.Args))
+	}
+
+	if resolved.Build.Args[0].Value != "hello" {
+		t.Errorf("expected value 'hello', got '%s'", resolved.Build.Args[0].Value)
+	}
+}
+
+func TestResolveProfile_ResolvedSuffixIncludesProfileName(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfile(conf.Defaults.Profile)
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	want := conf.Defaults.Suffix + "-" + conf.Defaults.Profile
+	if resolved.Suffix != want {
+		t.Errorf("expected suffix %q, got %q", want, resolved.Suffix)
 	}
 }

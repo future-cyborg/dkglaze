@@ -221,7 +221,6 @@ func TestWriteTemplateFile(t *testing.T) {
 
 		defer os.Remove(outFile) //nolint
 
-		// File must be fully flushed/closed — open again and verify content
 		f, err := os.Open(outFile) //nolint:gosec // path comes from our own CreateTemp call
 		if err != nil {
 			t.Fatalf("could not open output file: %v", err)
@@ -271,24 +270,24 @@ func TestValidateImageRef(t *testing.T) {
 	}
 }
 
-func TestBuildArgsFromConfig(t *testing.T) {
+func TestBuildArgsFromResolved(t *testing.T) {
 	t.Run("empty args", func(t *testing.T) {
-		conf := &config.Config{}
-		got := docker.ExportedBuildArgsFromConfig(conf)
+		resolved := &config.ResolvedConfig{}
+		got := docker.ExportedBuildArgsFromResolved(resolved)
 		if len(got) != 0 {
 			t.Errorf("expected empty slice, got %v", got)
 		}
 	})
 
 	t.Run("single arg", func(t *testing.T) {
-		conf := &config.Config{
+		resolved := &config.ResolvedConfig{
 			Build: config.Build{
 				Args: []config.BuildArg{
 					{Key: "FOO", Value: "bar"},
 				},
 			},
 		}
-		got := docker.ExportedBuildArgsFromConfig(conf)
+		got := docker.ExportedBuildArgsFromResolved(resolved)
 		want := []string{"--build-arg", "FOO=bar"}
 		if len(got) != len(want) {
 			t.Fatalf("want %v, got %v", want, got)
@@ -301,7 +300,7 @@ func TestBuildArgsFromConfig(t *testing.T) {
 	})
 
 	t.Run("multiple args", func(t *testing.T) {
-		conf := &config.Config{
+		resolved := &config.ResolvedConfig{
 			Build: config.Build{
 				Args: []config.BuildArg{
 					{Key: "FOO", Value: "bar"},
@@ -309,7 +308,7 @@ func TestBuildArgsFromConfig(t *testing.T) {
 				},
 			},
 		}
-		got := docker.ExportedBuildArgsFromConfig(conf)
+		got := docker.ExportedBuildArgsFromResolved(resolved)
 		if len(got) != 4 {
 			t.Fatalf("expected 4 elements, got %d: %v", len(got), got)
 		}
@@ -318,6 +317,52 @@ func TestBuildArgsFromConfig(t *testing.T) {
 		}
 		if got[2] != "--build-arg" || got[3] != "BAZ=qux" {
 			t.Errorf("second arg wrong: %v", got[2:])
+		}
+	})
+}
+
+func TestMountFlagsFromResolved(t *testing.T) {
+	t.Run("no mounts", func(t *testing.T) {
+		resolved := &config.ResolvedConfig{}
+		got := docker.ExportedMountFlagsFromResolved(resolved)
+		if len(got) != 0 {
+			t.Errorf("expected empty slice, got %v", got)
+		}
+	})
+
+	t.Run("single mount", func(t *testing.T) {
+		resolved := &config.ResolvedConfig{
+			Run: config.Run{
+				Mounts: []string{"/host:/container"},
+			},
+		}
+		got := docker.ExportedMountFlagsFromResolved(resolved)
+		want := []string{"--volume", "/host:/container"}
+		if len(got) != len(want) {
+			t.Fatalf("want %v, got %v", want, got)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("index %d: want %q, got %q", i, want[i], got[i])
+			}
+		}
+	})
+
+	t.Run("multiple mounts", func(t *testing.T) {
+		resolved := &config.ResolvedConfig{
+			Run: config.Run{
+				Mounts: []string{"/a:/a", "/b:/b:ro"},
+			},
+		}
+		got := docker.ExportedMountFlagsFromResolved(resolved)
+		if len(got) != 4 {
+			t.Fatalf("expected 4 elements, got %d: %v", len(got), got)
+		}
+		if got[0] != "--volume" || got[1] != "/a:/a" {
+			t.Errorf("first mount wrong: %v", got[:2])
+		}
+		if got[2] != "--volume" || got[3] != "/b:/b:ro" {
+			t.Errorf("second mount wrong: %v", got[2:])
 		}
 	})
 }

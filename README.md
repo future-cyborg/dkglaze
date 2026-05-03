@@ -1,8 +1,8 @@
 # udocker
 
-`udocker` builds and runs personalized Docker images by layering user-specific customizations on top of an existing base image. You define a set of Dockerfile templates and build arguments in a config file, and `udocker` handles chaining the builds, tagging the result, and running the final image.
+`udocker` builds and runs personalized Docker images by layering user-specific customizations on top of an existing base image. You define **features** (named bundles of Dockerfile templates, build arguments, and run configuration) and **profiles** (ordered combinations of features) in a config file, and `udocker` handles chaining the builds, tagging the result, and running the final image.
 
-A typical use case: take a standard image like `ubuntu:22.04` and automatically layer your dotfiles, user account, tools, or SSH keys on top of it — reproducibly.
+A typical use case: take a standard image like `ubuntu:22.04` and automatically layer your dotfiles, user account, tools, or SSH keys on top of it — reproducibly. Switch between a minimal `default` profile and a `gpu-dev` profile with a single flag.
 
 ## Installation
 
@@ -28,12 +28,19 @@ udocker <command> [flags]
 
 **Global flag:** `--verbose` — shows full error stack traces.
 
+**Profile flag:** `--profile <name>` (or `-p <name>`) on `build` and `run` — overrides `defaults.profile`.
+
 ### Examples
 
 ```sh
 udocker init
 udocker build ubuntu:22.04
 udocker run ubuntu:22.04
+
+# Use a non-default profile
+udocker build --profile gpu-dev ubuntu:22.04
+udocker run -p gpu-dev ubuntu:22.04
+
 udocker clean -n   # preview what would be removed
 udocker clean      # remove all udocker-managed images
 ```
@@ -42,12 +49,12 @@ udocker clean      # remove all udocker-managed images
 
 ### Build
 
-`udocker build <image>` is a wrapper around `docker build`. It does not build anything itself — it generates a sequence of `docker build` invocations driven by your config.
+`udocker build <image>` resolves the active profile, merges its features in order, then runs a sequence of `docker build` invocations.
 
-For each template listed under `build.templates`, udocker:
+For each template in the merged template list, udocker:
 
 1. Renders the `.dockerfile` template, substituting `{{ .image }}` with the current source image tag.
-2. Runs `docker build --label com.udocker=true -t <intermediate-tag> -f <rendered-dockerfile> <context-dir>` with any configured `build.args` appended as `--build-arg` flags.
+2. Runs `docker build --label com.udocker=true -t <intermediate-tag> -f <rendered-dockerfile> <context-dir>` with any merged `build.args` appended as `--build-arg` flags.
 3. Uses the output image as the source for the next template.
 
 After all templates have run, the final intermediate image is retagged as `<base>-<suffix>:<tag>` and the intermediates are removed. If any step fails, all intermediate images are cleaned up automatically.
@@ -55,9 +62,9 @@ After all templates have run, the final intermediate image is retagged as `<base
 For example, with `image = ubuntu:22.04`, `suffix = udocker`, and two templates `base` and `user`, udocker runs:
 
 ```
-docker build ... -t ubuntu-udocker.0:22.04 -f base.dockerfile  # step 0: FROM ubuntu:22.04
-docker build ... -t ubuntu-udocker.1:22.04 -f user.dockerfile  # step 1: FROM ubuntu-udocker.0:22.04
-docker tag ubuntu-udocker.1:22.04 ubuntu-udocker:22.04         # final tag
+docker build ... -t ubuntu-udocker-default.0:22.04 -f base.dockerfile  # step 0: FROM ubuntu:22.04
+docker build ... -t ubuntu-udocker-default.1:22.04 -f user.dockerfile  # step 1: FROM ubuntu-udocker-default.0:22.04
+docker tag ubuntu-udocker-default.1:22.04 ubuntu-udocker-default:22.04 # final tag
 ```
 
 Extra args can be passed directly to every `docker build` call by appending them after `--`:
@@ -68,53 +75,100 @@ udocker build ubuntu:22.04 -- --no-cache --build-arg FOO=bar
 
 ### Run
 
-`udocker run <image>` is a wrapper around `docker run`. It resolves the user-layer image name, builds it if it doesn't exist yet, then runs:
+`udocker run <image>` resolves the active profile, merges its features, then runs:
 
 ```
-docker run <run.args from config> <args from CLI> <image>-<suffix>:<tag>
+docker run [merged run.args] [--volume <mount>...] [CLI args] <image>-<suffix>:<tag>
 ```
 
-Arguments from `run.args` in the config are always prepended, followed by any args passed on the command line after `--`. This lets you set persistent defaults (e.g. `-it --rm -v $HOME:/home/user`) in config while still being able to pass one-off flags at runtime:
+Mounts from `run.mounts` are expanded (`~` and `$VAR`) and passed as `--volume` flags before any CLI args. This lets you set persistent volume mounts in config while still passing one-off flags at runtime:
 
 ```sh
 udocker run ubuntu:22.04 -- -e DEBUG=1
-# executes: docker run -it --rm -e DEBUG=1 ubuntu-udocker:22.04
+# executes: docker run -it --rm --volume /home/alice/.config/opencode:/root/.config/opencode -e DEBUG=1 ubuntu-udocker:22.04
 ```
 
 ## Configuration
 
 Config lives at `~/.config/udocker/config.yml`. Run `udocker init` to create it with defaults.
 
+All configuration is organized into **features** and **profiles**. There are no top-level `build` or `run` sections.
+
 ```yaml
 defaults:
-  suffix: udocker   # (required) Appended to the base image name to form the output image name.
-                    # e.g. ubuntu:22.04 → ubuntu-udocker:22.04
+  suffix: udocker     # (required) Appended to base image name along with the active profile name.
+                      # e.g. ubuntu:22.04 + suffix "udocker" + profile "default" → ubuntu-udocker-default:22.04
+  profile: default    # (required) Profile used when --profile flag is not set
 
-build:
-  templates:        # Ordered list of Dockerfile template names to apply in sequence.
-    - base          # Resolves to ~/.config/udocker/templates/base.dockerfile
-    - user          # Resolves to ~/.config/udocker/templates/user.dockerfile
+features:
+  base:
+    build:
+      templates:      # Ordered list of Dockerfile template names applied in sequence.
+        - base        # Resolves to ~/.config/udocker/templates/base.dockerfile
+      args:
+        - key: USERNAME
+          value: alice              # Static value.
+        - key: MY_TOKEN
+          cmd: pass show my-token   # Dynamic: shell command run at load time; stdout becomes value.
+    run:
+      args:
+        - -it
+        - --rm
+      mounts:         # Docker volume mount strings. ~ and $VAR are expanded.
+        - ~/.dotfiles:/root/.dotfiles
 
-  args:             # Build arguments passed to every docker build step.
-    - key: USERNAME
-      value: alice              # Static: value is used as-is.
-    - key: MY_TOKEN
-      cmd: pass show my-token   # Dynamic: shell command is run at config-load time;
-                                # trimmed stdout becomes the value.
+  opencode:
+    build:
+      templates:
+        - opencode
+    run:
+      mounts:
+        - ~/.config/opencode:/root/.config/opencode
+        - ~/.config/opencode/extensions:/root/.config/opencode/extensions:ro
 
-run:
-  args:             # Arguments always prepended to docker run.
-    - -it
-    - --rm
-    - -v
-    - /home/alice:/home/alice
+  gpu:
+    build:
+      templates:
+        - cuda
+      args:
+        - key: CUDA_VERSION
+          value: "12.2"
+    run:
+      args:
+        - --gpus
+        - all
+
+profiles:
+  default:
+    features:
+      - base
+
+  opencode-dev:
+    features:
+      - base
+      - opencode
+
+  gpu-dev:
+    features:
+      - base
+      - gpu
+      - opencode
 ```
 
-The config file is validated against a JSON Schema on load. The only required field is `defaults.suffix`. No unknown top-level keys are permitted.
+### Profile resolution
+
+When a profile is activated, its features are merged in list order. For each feature:
+
+- `build.templates` are appended to the accumulated template list.
+- `build.args` are appended to the accumulated args list.
+- `run.args` are appended to the accumulated run args.
+- `run.mounts` are appended to the accumulated mounts list.
+
+The result is a flat build+run configuration used for that invocation.
 
 ### Dockerfile templates
 
-Templates live in `~/.config/udocker/templates/` and use Go's [`text/template`](https://pkg.go.dev/text/template) syntax. The only variable provided is `{{ .image }}`, which holds the source image tag for that build step (either the original base image or the output of the previous step).
+Templates live in `~/.config/udocker/templates/` and use Go's [`text/template`](https://pkg.go.dev/text/template) syntax. The only variable provided is `{{ .image }}`, which holds the source image tag for that build step.
 
 ```dockerfile
 # ~/.config/udocker/templates/base.dockerfile

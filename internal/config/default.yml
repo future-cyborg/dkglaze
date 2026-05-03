@@ -1,9 +1,17 @@
 defaults:
   suffix: udocker
+  profile: default
 
-build:
-  templates: []
-  args: []
+features:
+  base:
+    build:
+      templates: []
+      args: []
+    run:
+      args: []
+      mounts: []
 
-run:
-  args: []
+profiles:
+  default:
+    features:
+      - base
