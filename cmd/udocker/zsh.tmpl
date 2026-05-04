@@ -1,0 +1,70 @@
+#compdef {{.AppName}}
+
+_{{.AppName}}() {
+    local state
+
+    _arguments \
+        '1: :->subcmd' \
+        '*: :->args'
+
+    case $state in
+        subcmd)
+            local -a subcmds
+            subcmds=({{join " " (childNames .Cmds)}})
+            _describe 'command' subcmds
+            ;;
+        args)
+            case ${words[2]} in
+{{- range .Cmds}}
+{{- if isImages .PosCompl}}
+                {{.Name}})
+                    local -a images
+                    images=(${(f)"$(${words[1]} _list-images 2>/dev/null)"})
+                    _describe 'image' images
+                    ;;
+{{- else if isEnum .PosCompl}}
+                {{.Name}})
+                    local -a opts
+                    opts=({{enumVals .PosCompl}})
+                    _describe 'option' opts
+                    ;;
+{{- else if .Children}}
+                {{.Name}})
+                    if [[ ${#words} -eq 3 ]]; then
+                        local -a subcmds2
+                        subcmds2=({{join " " (childNames .Children)}})
+                        _describe 'subcommand' subcmds2
+                    else
+                        case ${words[3]} in
+{{- range .Children}}
+{{- if isImages .PosCompl}}
+                            {{.Name}})
+                                local -a images
+                                images=(${(f)"$(${words[1]} _list-images 2>/dev/null)"})
+                                _describe 'image' images
+                                ;;
+{{- else if isEnum .PosCompl}}
+                            {{.Name}})
+                                local -a opts
+                                opts=({{enumVals .PosCompl}})
+                                _describe 'option' opts
+                                ;;
+{{- else if .Children}}
+                            {{.Name}})
+                                local -a subcmds3
+                                subcmds3=({{join " " (childNames .Children)}})
+                                _describe 'subcommand' subcmds3
+                                ;;
+{{- end}}
+{{- end}}
+                        esac
+                    fi
+                    ;;
+{{- end}}
+{{- end}}
+            esac
+            ;;
+    esac
+}
+
+_{{.AppName}} "$@"

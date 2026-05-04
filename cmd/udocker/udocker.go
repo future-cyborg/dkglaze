@@ -74,9 +74,13 @@ type CompletionCmd struct {
 	Shell string `arg:"" enum:"bash,zsh" help:"Shell to generate completion for"`
 }
 
-//nolint:unparam // error return required by kong Run interface
 func (cmd *CompletionCmd) Run(_ *Context, k *kong.Kong) error {
-	fmt.Print(generateCompletion(cmd.Shell, k.Model))
+	script, err := generateCompletion(cmd.Shell, k.Model)
+	if err != nil {
+		return err
+	}
+
+	fmt.Print(script)
 
 	return nil
 }

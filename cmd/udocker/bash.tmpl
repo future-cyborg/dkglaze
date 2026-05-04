@@ -1,0 +1,74 @@
+{{.FnName}}() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+    local cmd="${COMP_WORDS[1]}"
+
+    if [[ "${COMP_CWORD}" -eq 1 ]]; then
+        COMPREPLY=($(compgen -W {{printf "%q" (join " " (childNames .Cmds))}} -- "${cur}"))
+        return
+    fi
+
+    if [[ "${cur}" == -* ]]; then
+        case "${cmd}" in
+{{- range .Cmds}}
+{{- if not .Children}}
+{{- if .Flags}}
+            {{.Name}}) COMPREPLY=($(compgen -W {{printf "%q" (flagWords .Flags)}} -- "${cur}"));;
+{{- end}}
+{{- else if anyHasFlags .Children}}
+            {{.Name}})
+                local subcmd="${COMP_WORDS[2]}"
+                case "${subcmd}" in
+{{- range .Children}}
+{{- if .Flags}}
+                    {{.Name}}) COMPREPLY=($(compgen -W {{printf "%q" (flagWords .Flags)}} -- "${cur}"));;
+{{- end}}
+{{- end}}
+                esac
+                ;;
+{{- end}}
+{{- end}}
+        esac
+        return
+    fi
+
+{{- if .ValueFlagPatterns}}
+    case "${prev}" in
+        {{join "|" .ValueFlagPatterns}}) return;;
+    esac
+
+{{end -}}
+    case "${cmd}" in
+{{- range .Cmds}}
+{{- if isImages .PosCompl}}
+        {{.Name}})
+            COMPREPLY=($(compgen -W "$("${COMP_WORDS[0]}" _list-images 2>/dev/null)" -- "${cur}"))
+            ;;
+{{- else if isEnum .PosCompl}}
+        {{.Name}}) COMPREPLY=($(compgen -W {{printf "%q" (enumVals .PosCompl)}} -- "${cur}"));;
+{{- else if .Children}}
+        {{.Name}})
+            local subcmd="${COMP_WORDS[2]}"
+            if [[ "${COMP_CWORD}" -eq 2 ]]; then
+                COMPREPLY=($(compgen -W {{printf "%q" (join " " (childNames .Children))}} -- "${cur}"))
+            else
+                case "${subcmd}" in
+{{- range .Children}}
+{{- if isImages .PosCompl}}
+                    {{.Name}})
+                        COMPREPLY=($(compgen -W "$("${COMP_WORDS[0]}" _list-images 2>/dev/null)" -- "${cur}"))
+                        ;;
+{{- else if isEnum .PosCompl}}
+                    {{.Name}}) COMPREPLY=($(compgen -W {{printf "%q" (enumVals .PosCompl)}} -- "${cur}"));;
+{{- else if .Children}}
+                    {{.Name}}) COMPREPLY=($(compgen -W {{printf "%q" (join " " (childNames .Children))}} -- "${cur}"));;
+{{- end}}
+{{- end}}
+                esac
+            fi
+            ;;
+{{- end}}
+{{- end}}
+    esac
+}
+complete -F {{.FnName}} {{.AppName}}
