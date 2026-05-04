@@ -143,16 +143,19 @@ func findMappingValue(node *yaml.Node, key string) *yaml.Node {
 }
 
 func writeAtomically(path string, node *yaml.Node) error {
+	data, err := yaml.Marshal(node)
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.yml.tmp")
 	if err != nil {
 		return errors.Wrap(err)
 	}
 
 	tmpName := tmp.Name()
-	enc := yaml.NewEncoder(tmp)
-	enc.SetIndent(2)
 
-	if err = enc.Encode(node); err != nil {
+	if _, err = tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 
