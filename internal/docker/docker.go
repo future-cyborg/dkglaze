@@ -64,7 +64,7 @@ func Build(ctx context.Context, image string, buildArgs []string, profile string
 		return err
 	}
 
-	resolved, err := loadResolved(profile, true)
+	resolved, err := loadResolved(ctx, profile, true)
 	if err != nil {
 		return err
 	}
@@ -105,7 +105,7 @@ func Build(ctx context.Context, image string, buildArgs []string, profile string
 }
 
 //nolint:revive // flag-parameter is the clearest API here
-func loadResolved(profile string, resolveArgs bool) (*config.ResolvedConfig, error) {
+func loadResolved(ctx context.Context, profile string, resolveArgs bool) (*config.ResolvedConfig, error) {
 	conf, err := config.LoadConfig()
 	if err != nil {
 		return nil, errors.Wrap(err)
@@ -119,7 +119,7 @@ func loadResolved(profile string, resolveArgs bool) (*config.ResolvedConfig, err
 	var resolved *config.ResolvedConfig
 
 	if resolveArgs {
-		resolved, err = conf.ResolveProfile(activeProfile)
+		resolved, err = conf.ResolveProfile(ctx, activeProfile)
 	} else {
 		resolved, err = conf.ResolveProfileNoArgs(activeProfile)
 	}
@@ -171,7 +171,7 @@ func Run(ctx context.Context, image string, runArgs []string, profile string) er
 		return err
 	}
 
-	resolved, err := loadResolved(profile, false)
+	resolved, err := loadResolved(ctx, profile, false)
 	if err != nil {
 		return err
 	}

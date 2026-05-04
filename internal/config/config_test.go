@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -225,7 +226,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile("default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -299,7 +300,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile("combined")
+	resolved, err := conf.ResolveProfile(context.Background(), "combined")
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -338,7 +339,7 @@ func TestResolveProfile_UnknownProfileReturnsError(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile("nonexistent")
+	_, err = conf.ResolveProfile(context.Background(), "nonexistent")
 	if err == nil {
 		t.Error("expected error for unknown profile, got nil")
 	}
@@ -378,7 +379,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile("bad")
+	_, err = conf.ResolveProfile(context.Background(), "bad")
 	if err == nil {
 		t.Error("expected error for unknown feature, got nil")
 	}
@@ -419,7 +420,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile("default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -470,7 +471,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile("default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -521,7 +522,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile("default")
+	_, err = conf.ResolveProfile(context.Background(), "default")
 	if err == nil {
 		t.Error("expected error for undefined env var in mount, got nil")
 	}
@@ -563,7 +564,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile("default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -590,7 +591,7 @@ func TestResolveProfile_ResolvedSuffixIncludesProfileName(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile(conf.Defaults.Profile)
+	resolved, err := conf.ResolveProfile(context.Background(), conf.Defaults.Profile)
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -660,7 +661,7 @@ profiles:
 		return
 	}
 
-	_, err = conf.ResolveProfile("default")
+	_, err = conf.ResolveProfile(context.Background(), "default")
 	if err == nil {
 		t.Error("expected error when both value and cmd are set, got nil")
 	}
@@ -702,7 +703,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile("default")
+	_, err = conf.ResolveProfile(context.Background(), "default")
 	if err == nil {
 		t.Error("expected error when neither value nor cmd is set, got nil")
 	}
@@ -727,7 +728,7 @@ func TestPopulateArg_CmdExitsNonZeroWithStderr(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile("default")
+	_, err = conf.ResolveProfile(context.Background(), "default")
 	if err == nil {
 		t.Error("expected error for non-zero exit with stderr, got nil")
 	}
@@ -752,7 +753,7 @@ func TestPopulateArg_CmdExitsNonZeroWithoutStderr(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile("default")
+	_, err = conf.ResolveProfile(context.Background(), "default")
 	if err == nil {
 		t.Error("expected error for non-zero exit without stderr, got nil")
 	}
@@ -793,7 +794,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile("default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}

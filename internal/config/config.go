@@ -201,13 +201,13 @@ func GetConfigPaths() (Paths, error) {
 
 // ResolveProfile merges the named profile's features in order and evaluates
 // cmd-type build args. Use ResolveProfileNoArgs when build args are not needed.
-func (conf *Config) ResolveProfile(name string) (*ResolvedConfig, error) {
+func (conf *Config) ResolveProfile(ctx context.Context, name string) (*ResolvedConfig, error) {
 	resolved, err := conf.mergeProfile(name)
 	if err != nil {
 		return nil, err
 	}
 
-	if err = resolved.populateArgs(); err != nil {
+	if err = resolved.populateArgs(ctx); err != nil {
 		return nil, errors.Wrap(err)
 	}
 
@@ -309,11 +309,11 @@ func expandTilde(path string) (string, error) {
 	return currentUser.HomeDir + path[1:], nil
 }
 
-func (resolved *ResolvedConfig) populateArgs() error {
+func (resolved *ResolvedConfig) populateArgs(ctx context.Context) error {
 	for i := range resolved.Build.Args {
 		arg := &resolved.Build.Args[i]
 
-		value, err := populateArg(arg.Value, arg.Cmd, arg)
+		value, err := populateArg(ctx, arg.Value, arg.Cmd, arg)
 		if err != nil {
 			return err
 		}
@@ -324,7 +324,7 @@ func (resolved *ResolvedConfig) populateArgs() error {
 	return nil
 }
 
-func populateArg(value, cmd string, buildArg *BuildArg) (string, error) {
+func populateArg(ctx context.Context, value, cmd string, buildArg *BuildArg) (string, error) {
 	if value != "" && cmd != "" {
 		return "", errors.Wrap(errBothValueAndCmd, buildArg)
 	}
@@ -337,7 +337,7 @@ func populateArg(value, cmd string, buildArg *BuildArg) (string, error) {
 		return value, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	//nolint:gosec // command is sourced from user's config file

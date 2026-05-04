@@ -96,21 +96,21 @@ type ConfigShowCmd struct {
 	Resolved bool `name:"resolved" help:"Show computed values after merging features and expanding variables"`
 }
 
-func (cmd *ConfigShowCmd) Run(_ *Context) error {
+func (cmd *ConfigShowCmd) Run(ctx *Context) error {
 	if cmd.Resolved {
-		return showResolved()
+		return showResolved(ctx.Ctx)
 	}
 
 	return showRaw()
 }
 
-func showResolved() error {
+func showResolved(ctx context.Context) error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return errors.Wrap(err)
 	}
 
-	out, err := config.ShowResolved(cfg)
+	out, err := config.ShowResolved(ctx, cfg)
 	if err != nil {
 		return errors.Wrap(err)
 	}
@@ -139,7 +139,7 @@ func showRaw() error {
 // ConfigEditCmd opens the config file in $EDITOR.
 type ConfigEditCmd struct{}
 
-func (*ConfigEditCmd) Run(_ *Context) error {
+func (*ConfigEditCmd) Run(ctx *Context) error {
 	paths, err := config.GetConfigPaths()
 	if err != nil {
 		return errors.Wrap(err)
@@ -151,7 +151,7 @@ func (*ConfigEditCmd) Run(_ *Context) error {
 	}
 
 	//nolint:gosec // editor and path are from user environment / config
-	c := exec.CommandContext(context.Background(), editor, paths.ConfigFile)
+	c := exec.CommandContext(ctx.Ctx, editor, paths.ConfigFile)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

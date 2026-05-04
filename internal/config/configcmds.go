@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	goerrors "errors"
 	"fmt"
 	"os"
@@ -74,13 +75,13 @@ func SetDefaultProfile(cfgPath, profile string) error {
 }
 
 // ShowResolved resolves all profiles and returns a formatted string of the computed config.
-func ShowResolved(cfg *Config) (string, error) {
+func ShowResolved(ctx context.Context, cfg *Config) (string, error) {
 	names := sortedProfileNames(cfg)
 
 	var sb strings.Builder
 
 	for _, name := range names {
-		resolved, err := cfg.ResolveProfile(name)
+		resolved, err := cfg.ResolveProfile(ctx, name)
 		if err != nil {
 			return "", err
 		}

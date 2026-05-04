@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -365,7 +366,7 @@ func TestShowResolved_ContainsAllProfiles(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	out, err := config.ShowResolved(cfg)
+	out, err := config.ShowResolved(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("show resolved error: %v", err)
 	}
@@ -397,7 +398,7 @@ func TestShowResolved_ContainsMergedBuildArgs(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	out, err := config.ShowResolved(cfg)
+	out, err := config.ShowResolved(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("show resolved error: %v", err)
 	}
