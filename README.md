@@ -25,6 +25,7 @@ udocker <command> [flags]
 | `clean [-n]` | Remove all images created by udocker (`-n` for dry run) |
 | `list` | List all images created by udocker |
 | `config` | Manage configuration (see below) |
+| `completion <bash\|zsh>` | Print shell completion script to stdout |
 
 ### `udocker config` subcommands
 
@@ -68,6 +69,23 @@ udocker clean      # remove all udocker-managed images
 # Pull the latest base image before rebuilding
 udocker build --pull ubuntu:22.04
 ```
+
+## Shell Completion
+
+Generate and install a completion script for your shell:
+
+```sh
+# Bash — filename must match the command name
+udocker completion bash > ~/.local/share/bash-completion/completions/udocker
+
+# Zsh — filename must be prefixed with underscore and on $fpath
+udocker completion zsh > ~/.zsh/completions/_udocker
+```
+
+The zsh file **must** be named `_udocker` (leading underscore) to be picked up by `compinit`.
+
+Completions are generated dynamically from the CLI model. Local Docker images are listed at
+tab-press time by calling `udocker _list-images` (images managed by udocker are excluded).
 
 ## How it works
 

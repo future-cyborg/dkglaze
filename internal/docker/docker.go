@@ -269,6 +269,41 @@ func listUdockerImages(ctx context.Context, cli *client.Client) ([]imageapi.Summ
 	return imageList.Items, nil
 }
 
+// ListNonUdockerImages returns tags of all local Docker images not managed by udocker.
+func ListNonUdockerImages(ctx context.Context) ([]string, error) {
+	cli, err := newDockerClient()
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	defer func() { _ = cli.Close() }()
+
+	imageList, err := cli.ImageList(ctx, client.ImageListOptions{})
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	var tags []string
+
+	for i := range imageList.Items {
+		img := &imageList.Items[i]
+
+		if img.Labels["com.udocker"] != "" {
+			continue
+		}
+
+		for _, tag := range img.RepoTags {
+			if tag == "<none>:<none>" {
+				continue
+			}
+
+			tags = append(tags, tag)
+		}
+	}
+
+	return tags, nil
+}
+
 // List prints all images managed by udocker.
 func List(ctx context.Context) error {
 	cli, err := newDockerClient()
