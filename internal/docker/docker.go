@@ -56,6 +56,17 @@ func newDockerClient() (*client.Client, error) {
 	return cli, nil
 }
 
+func withDockerClient(fn func(*client.Client) error) error {
+	cli, err := newDockerClient()
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = cli.Close() }()
+
+	return fn(cli)
+}
+
 // Build builds the user layer on top of the image.
 //
 //nolint:revive // flag-parameter is the clearest API here
@@ -176,32 +187,27 @@ func Run(ctx context.Context, image string, runArgs []string, profile string) er
 		return err
 	}
 
-	cli, err := newDockerClient()
-	if err != nil {
-		return errors.Wrap(err)
-	}
+	return withDockerClient(func(cli *client.Client) error {
+		newImage := newImageName(image, resolved.Suffix)
 
-	defer func() { _ = cli.Close() }()
-
-	newImage := newImageName(image, resolved.Suffix)
-
-	exists, err := imageExists(ctx, cli, newImage)
-	if err != nil {
-		return errors.Wrap(err)
-	}
-
-	if !exists {
-		logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
-
-		if err = Build(ctx, image, nil, profile, false); err != nil {
+		exists, err := imageExists(ctx, cli, newImage)
+		if err != nil {
 			return errors.Wrap(err)
 		}
-	}
 
-	command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs)
-	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
+		if !exists {
+			logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
 
-	return execCommand(ctx, command)
+			if err = Build(ctx, image, nil, profile, false); err != nil {
+				return errors.Wrap(err)
+			}
+		}
+
+		command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs)
+		logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
+
+		return execCommand(ctx, command)
+	})
 }
 
 func execCommand(ctx context.Context, command []string) error {
@@ -225,38 +231,33 @@ func pullImage(ctx context.Context, image string) error {
 //
 //nolint:revive // flag-parameter is the clearest API here
 func Clean(ctx context.Context, dryRun bool) error {
-	cli, err := newDockerClient()
-	if err != nil {
-		return errors.Wrap(err)
-	}
-
-	defer func() { _ = cli.Close() }()
-
-	imageItems, err := listUdockerImages(ctx, cli)
-	if err != nil {
-		return err
-	}
-
-	if dryRun {
-		logger.PrintColor(logger.Cyan, "Would remove:")
-	} else {
-		logger.PrintColor(logger.Cyan, "Removing:")
-	}
-
-	var allErr error
-
-	for item := range imageItems {
-		err = cleanImage(ctx, cli, &imageItems[item], dryRun)
+	return withDockerClient(func(cli *client.Client) error {
+		imageItems, err := listUdockerImages(ctx, cli)
 		if err != nil {
-			allErr = errors.Join(allErr, err)
+			return err
 		}
-	}
 
-	if allErr != nil {
-		return errors.Wrap(allErr)
-	}
+		if dryRun {
+			logger.PrintColor(logger.Cyan, "Would remove:")
+		} else {
+			logger.PrintColor(logger.Cyan, "Removing:")
+		}
 
-	return nil
+		var allErr error
+
+		for item := range imageItems {
+			err = cleanImage(ctx, cli, &imageItems[item], dryRun)
+			if err != nil {
+				allErr = errors.Join(allErr, err)
+			}
+		}
+
+		if allErr != nil {
+			return errors.Wrap(allErr)
+		}
+
+		return nil
+	})
 }
 
 func listUdockerImages(ctx context.Context, cli *client.Client) ([]imageapi.Summary, error) {
@@ -271,64 +272,56 @@ func listUdockerImages(ctx context.Context, cli *client.Client) ([]imageapi.Summ
 
 // ListNonUdockerImages returns tags of all local Docker images not managed by udocker.
 func ListNonUdockerImages(ctx context.Context) ([]string, error) {
-	cli, err := newDockerClient()
-	if err != nil {
-		return nil, errors.Wrap(err)
-	}
-
-	defer func() { _ = cli.Close() }()
-
-	imageList, err := cli.ImageList(ctx, client.ImageListOptions{})
-	if err != nil {
-		return nil, errors.Wrap(err)
-	}
-
 	var tags []string
 
-	for i := range imageList.Items {
-		img := &imageList.Items[i]
-
-		if img.Labels["com.udocker"] != "" {
-			continue
+	err := withDockerClient(func(cli *client.Client) error {
+		imageList, err := cli.ImageList(ctx, client.ImageListOptions{})
+		if err != nil {
+			return errors.Wrap(err)
 		}
 
-		for _, tag := range img.RepoTags {
-			if tag == "<none>:<none>" {
+		for i := range imageList.Items {
+			img := &imageList.Items[i]
+
+			if img.Labels["com.udocker"] != "" {
 				continue
 			}
 
-			tags = append(tags, tag)
-		}
-	}
+			for _, tag := range img.RepoTags {
+				if tag == "<none>:<none>" {
+					continue
+				}
 
-	return tags, nil
+				tags = append(tags, tag)
+			}
+		}
+
+		return nil
+	})
+
+	return tags, err
 }
 
 // List prints all images managed by udocker.
 func List(ctx context.Context) error {
-	cli, err := newDockerClient()
-	if err != nil {
-		return errors.Wrap(err)
-	}
-
-	defer func() { _ = cli.Close() }()
-
-	images, err := listUdockerImages(ctx, cli)
-	if err != nil {
-		return err
-	}
-
-	for i := range images {
-		if len(images[i].RepoTags) > 0 {
-			for _, tag := range images[i].RepoTags {
-				logger.PrintColor(logger.Cyan, tag)
-			}
-		} else {
-			logger.PrintColor(logger.Cyan, images[i].ID)
+	return withDockerClient(func(cli *client.Client) error {
+		images, err := listUdockerImages(ctx, cli)
+		if err != nil {
+			return err
 		}
-	}
 
-	return nil
+		for i := range images {
+			if len(images[i].RepoTags) > 0 {
+				for _, tag := range images[i].RepoTags {
+					logger.PrintColor(logger.Cyan, tag)
+				}
+			} else {
+				logger.PrintColor(logger.Cyan, images[i].ID)
+			}
+		}
+
+		return nil
+	})
 }
 
 //nolint:revive // flag-parameter is the clearest API here
