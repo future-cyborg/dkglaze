@@ -33,6 +33,7 @@ var (
 	errUnknownProfile    = goerrors.New("unknown profile")
 	errUnknownFeature    = goerrors.New("unknown feature")
 	errDefaultProfile    = goerrors.New("defaults.profile references unknown profile")
+	errUndefinedEnvVar   = goerrors.New("undefined environment variable in mount")
 )
 
 // Config represents the configuration.
@@ -236,39 +237,76 @@ func (conf *Config) mergeProfile(name string) (*ResolvedConfig, error) {
 		resolved.Build.Templates = append(resolved.Build.Templates, feature.Build.Templates...)
 		resolved.Build.Args = append(resolved.Build.Args, feature.Build.Args...)
 		resolved.Run.Args = append(resolved.Run.Args, feature.Run.Args...)
-		resolved.Run.Mounts = append(resolved.Run.Mounts, expandMounts(feature.Run.Mounts)...)
+
+		mounts, err := expandMounts(feature.Run.Mounts)
+		if err != nil {
+			return nil, errors.Wrap(err)
+		}
+
+		resolved.Run.Mounts = append(resolved.Run.Mounts, mounts...)
 	}
 
 	return resolved, nil
 }
 
-func expandMounts(mounts []string) []string {
+func expandMounts(mounts []string) ([]string, error) {
 	if len(mounts) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	expanded := make([]string, len(mounts))
 
 	for i, m := range mounts {
-		m = os.ExpandEnv(m)
-		m = expandTilde(m)
+		var err error
+
+		m, err = expandEnvStrict(m)
+		if err != nil {
+			return nil, err
+		}
+
+		m, err = expandTilde(m)
+		if err != nil {
+			return nil, err
+		}
+
 		expanded[i] = m
 	}
 
-	return expanded
+	return expanded, nil
 }
 
-func expandTilde(path string) string {
+func expandEnvStrict(s string) (string, error) {
+	var missingVar string
+
+	result := os.Expand(s, func(key string) string {
+		val, ok := os.LookupEnv(key)
+		if !ok {
+			missingVar = key
+
+			return ""
+		}
+
+		return val
+	})
+
+	if missingVar != "" {
+		return "", errors.Wrap(fmt.Errorf("%w: $%s", errUndefinedEnvVar, missingVar))
+	}
+
+	return result, nil
+}
+
+func expandTilde(path string) (string, error) {
 	if !strings.HasPrefix(path, "~/") && path != "~" {
-		return path
+		return path, nil
 	}
 
 	currentUser, err := user.Current()
 	if err != nil {
-		return path
+		return "", errors.Wrap(err)
 	}
 
-	return currentUser.HomeDir + path[1:]
+	return currentUser.HomeDir + path[1:], nil
 }
 
 func (resolved *ResolvedConfig) populateArgs() error {

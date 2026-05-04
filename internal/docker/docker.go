@@ -8,12 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
 
 	"github.com/containerd/errdefs"
+	"github.com/distribution/reference"
 	imageapi "github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 
@@ -29,14 +29,11 @@ const (
 
 var errNoTemplates = goerrors.New("no templates specified")
 
-var (
-	errInvalidImageRef = goerrors.New("invalid image reference")
-	validImageRef      = regexp.MustCompile(`^[a-zA-Z0-9._\-/:@]+$`)
-)
+var errInvalidImageRef = goerrors.New("invalid image reference")
 
 func validateImageRef(image string) error {
-	if image == "" || !validImageRef.MatchString(image) {
-		return errors.Wrap(errInvalidImageRef)
+	if _, err := reference.ParseNormalizedNamed(image); err != nil {
+		return errors.Wrap(fmt.Errorf("%w: %w", errInvalidImageRef, err))
 	}
 
 	return nil
@@ -65,7 +62,7 @@ func Build(image string, buildArgs []string, profile string) (retErr error) {
 		return err
 	}
 
-	resolved, err := loadResolved(profile)
+	resolved, err := loadResolved(profile, true)
 	if err != nil {
 		return err
 	}
@@ -99,7 +96,8 @@ func Build(image string, buildArgs []string, profile string) (retErr error) {
 	return tagImage(cli, finalTag, newImageName(image, resolved.Suffix))
 }
 
-func loadResolved(profile string) (*config.ResolvedConfig, error) {
+//nolint:revive // flag-parameter is the clearest API here
+func loadResolved(profile string, resolveArgs bool) (*config.ResolvedConfig, error) {
 	conf, err := config.LoadConfig()
 	if err != nil {
 		return nil, errors.Wrap(err)
@@ -110,26 +108,14 @@ func loadResolved(profile string) (*config.ResolvedConfig, error) {
 		activeProfile = profile
 	}
 
-	resolved, err := conf.ResolveProfile(activeProfile)
-	if err != nil {
-		return nil, errors.Wrap(err)
+	var resolved *config.ResolvedConfig
+
+	if resolveArgs {
+		resolved, err = conf.ResolveProfile(activeProfile)
+	} else {
+		resolved, err = conf.ResolveProfileNoArgs(activeProfile)
 	}
 
-	return resolved, nil
-}
-
-func loadResolvedNoArgs(profile string) (*config.ResolvedConfig, error) {
-	conf, err := config.LoadConfig()
-	if err != nil {
-		return nil, errors.Wrap(err)
-	}
-
-	activeProfile := conf.Defaults.Profile
-	if profile != "" {
-		activeProfile = profile
-	}
-
-	resolved, err := conf.ResolveProfileNoArgs(activeProfile)
 	if err != nil {
 		return nil, errors.Wrap(err)
 	}
@@ -179,7 +165,7 @@ func Run(image string, runArgs []string, profile string) error {
 		return err
 	}
 
-	resolved, err := loadResolvedNoArgs(profile)
+	resolved, err := loadResolved(profile, false)
 	if err != nil {
 		return err
 	}
@@ -425,7 +411,7 @@ func cleanupTags(cli *client.Client, tags []string) error {
 
 		_, err := cli.ImageRemove(ctx, tag, client.ImageRemoveOptions{})
 		if err != nil {
-			logger.PrintColorFErr(logger.Red, "Failed to remove image: %s", tag)
+			logger.PrintColorFErr(logger.Red, "Failed to remove image %s: %v", tag, err)
 			allErr = errors.Join(allErr, errors.Wrap(err))
 		}
 	}

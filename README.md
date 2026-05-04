@@ -39,7 +39,15 @@ udocker <command> [flags]
 | `config edit` | Open the config file in `$EDITOR` |
 | `config path` | Print the config file path |
 
-**Global flag:** `--verbose` — shows full error stack traces.
+**Global flag:** `--verbose` — shows full error stack traces with file and line numbers. Without `--verbose`, only the outermost error message is shown.
+
+```
+# without --verbose
+udocker: unknown profile: "typo"
+
+# with --verbose
+udocker: /src/internal/config/config.go:226: /src/internal/config/config.go:115: unknown profile: typo
+```
 
 **Profile flag:** `--profile <name>` (or `-p <name>`) on `build` and `run` — overrides `defaults.profile`.
 
@@ -104,6 +112,12 @@ udocker run ubuntu:22.04 -- -e DEBUG=1
 ## Configuration
 
 Config lives at `~/.config/udocker/config.yml`. Run `udocker config init` to create it with defaults.
+
+To use a different config directory (useful for testing or multiple configurations), set the `UDOCKER_CONFIG_DIR` environment variable:
+
+```sh
+UDOCKER_CONFIG_DIR=~/my-other-config udocker build ubuntu:22.04
+```
 
 All configuration is organized into **features** and **profiles**. There are no top-level `build` or `run` sections.
 

@@ -484,6 +484,49 @@ profiles:
 	}
 }
 
+func TestResolveProfile_UndefinedEnvVarReturnsError(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: default
+features:
+  base:
+    build:
+      templates: []
+      args: []
+    run:
+      args: []
+      mounts:
+        - $UDOCKER_DEFINITELY_UNSET_VAR_XYZ:/container
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	os.Unsetenv("UDOCKER_DEFINITELY_UNSET_VAR_XYZ") //nolint:errcheck,tenv // intentional unset for test
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	_, err = conf.ResolveProfile("default")
+	if err == nil {
+		t.Error("expected error for undefined env var in mount, got nil")
+	}
+}
+
 func TestResolveProfile_EvaluatesCmdArg(t *testing.T) {
 	cleanup := withTempConfigDir(t)
 	defer cleanup()
@@ -555,5 +598,211 @@ func TestResolveProfile_ResolvedSuffixIncludesProfileName(t *testing.T) {
 	want := conf.Defaults.Suffix + "-" + conf.Defaults.Profile
 	if resolved.Suffix != want {
 		t.Errorf("expected suffix %q, got %q", want, resolved.Suffix)
+	}
+}
+
+func configWithCmdArg(suffix, profile, cmd string) string {
+	return `defaults:
+  suffix: ` + suffix + `
+  profile: ` + profile + `
+features:
+  base:
+    build:
+      templates: []
+      args:
+        - key: MY_ARG
+          cmd: ` + cmd + `
+    run:
+      args: []
+      mounts: []
+profiles:
+  default:
+    features:
+      - base
+`
+}
+
+func TestPopulateArg_BothValueAndCmdReturnsError(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: default
+features:
+  base:
+    build:
+      templates: []
+      args:
+        - key: MY_ARG
+          value: static
+          cmd: echo dynamic
+    run:
+      args: []
+      mounts: []
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		// Schema rejects having both value and cmd set — acceptable error path.
+		return
+	}
+
+	_, err = conf.ResolveProfile("default")
+	if err == nil {
+		t.Error("expected error when both value and cmd are set, got nil")
+	}
+}
+
+func TestPopulateArg_NeitherValueNorCmdReturnsError(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: default
+features:
+  base:
+    build:
+      templates: []
+      args:
+        - key: MY_ARG
+          value: ""
+    run:
+      args: []
+      mounts: []
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	_, err = conf.ResolveProfile("default")
+	if err == nil {
+		t.Error("expected error when neither value nor cmd is set, got nil")
+	}
+}
+
+func TestPopulateArg_CmdExitsNonZeroWithStderr(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := configWithCmdArg("test", "default", "sh -c 'echo oops >&2; exit 1'")
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	_, err = conf.ResolveProfile("default")
+	if err == nil {
+		t.Error("expected error for non-zero exit with stderr, got nil")
+	}
+}
+
+func TestPopulateArg_CmdExitsNonZeroWithoutStderr(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := configWithCmdArg("test", "default", "sh -c 'exit 1'")
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	_, err = conf.ResolveProfile("default")
+	if err == nil {
+		t.Error("expected error for non-zero exit without stderr, got nil")
+	}
+}
+
+func TestExpandTilde_OnlyTilde(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: default
+features:
+  base:
+    build:
+      templates: []
+      args: []
+    run:
+      args: []
+      mounts:
+        - "~"
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfile("default")
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Run.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(resolved.Run.Mounts))
+	}
+
+	if resolved.Run.Mounts[0] == "~" {
+		t.Error("expected ~ to be expanded, but it was not")
 	}
 }

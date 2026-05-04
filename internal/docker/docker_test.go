@@ -242,7 +242,7 @@ func TestValidateImageRef(t *testing.T) {
 		"ubuntu",
 		"ubuntu:22.04",
 		"registry.example.com:5000/myimage:1.0",
-		"registry.example.com/myimage@sha256:abc123",
+		"registry.example.com/myimage@sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
 	}
 
 	for _, img := range valid {
@@ -259,6 +259,8 @@ func TestValidateImageRef(t *testing.T) {
 		"ubuntu&&id",
 		"image name with spaces",
 		"image\nwith\nnewline",
+		"Ubuntu",
+		"registry.example.com/myimage@sha256:abc123",
 	}
 
 	for _, img := range invalid {
