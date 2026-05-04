@@ -22,7 +22,7 @@ var (
 
 // ListProfiles returns a formatted string listing all profiles with the default marked.
 func ListProfiles(cfg *Config) string {
-	names := sortedProfileNames(cfg)
+	names := sortedMapKeys(cfg.Profiles)
 
 	var sb strings.Builder
 
@@ -41,7 +41,7 @@ func ListProfiles(cfg *Config) string {
 
 // ListFeatures returns a formatted string summarizing all features with counts.
 func ListFeatures(cfg *Config) string {
-	names := sortedFeatureNames(cfg)
+	names := sortedMapKeys(cfg.Features)
 
 	var sb strings.Builder
 
@@ -76,7 +76,7 @@ func SetDefaultProfile(cfgPath, profile string) error {
 
 // ShowResolved resolves all profiles and returns a formatted string of the computed config.
 func ShowResolved(ctx context.Context, cfg *Config) (string, error) {
-	names := sortedProfileNames(cfg)
+	names := sortedMapKeys(cfg.Profiles)
 
 	var sb strings.Builder
 
@@ -198,26 +198,14 @@ func writeResolvedList(sb *strings.Builder, label string, items []string) {
 	}
 }
 
-func sortedProfileNames(cfg *Config) []string {
-	names := make([]string, 0, len(cfg.Profiles))
+func sortedMapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
 
-	for name := range cfg.Profiles {
-		names = append(names, name)
+	for k := range m {
+		keys = append(keys, k)
 	}
 
-	sort.Strings(names)
+	sort.Strings(keys)
 
-	return names
-}
-
-func sortedFeatureNames(cfg *Config) []string {
-	names := make([]string, 0, len(cfg.Features))
-
-	for name := range cfg.Features {
-		names = append(names, name)
-	}
-
-	sort.Strings(names)
-
-	return names
+	return keys
 }
