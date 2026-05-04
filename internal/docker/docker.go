@@ -75,9 +75,19 @@ func Build(ctx context.Context, image string, buildArgs []string, profile string
 		return err
 	}
 
-	resolved, err := loadResolved(ctx, profile, true)
+	conf, err := config.LoadConfig()
 	if err != nil {
-		return err
+		return errors.Wrap(err)
+	}
+
+	activeProfile := conf.Defaults.Profile
+	if profile != "" {
+		activeProfile = profile
+	}
+
+	resolved, err := conf.ResolveProfile(ctx, activeProfile)
+	if err != nil {
+		return errors.Wrap(err)
 	}
 
 	if len(resolved.Build.Templates) == 0 {
@@ -113,33 +123,6 @@ func Build(ctx context.Context, image string, buildArgs []string, profile string
 	}
 
 	return tagImage(ctx, cli, finalTag, newImageName(image, resolved.Suffix))
-}
-
-//nolint:revive // flag-parameter is the clearest API here
-func loadResolved(ctx context.Context, profile string, resolveArgs bool) (*config.ResolvedConfig, error) {
-	conf, err := config.LoadConfig()
-	if err != nil {
-		return nil, errors.Wrap(err)
-	}
-
-	activeProfile := conf.Defaults.Profile
-	if profile != "" {
-		activeProfile = profile
-	}
-
-	var resolved *config.ResolvedConfig
-
-	if resolveArgs {
-		resolved, err = conf.ResolveProfile(ctx, activeProfile)
-	} else {
-		resolved, err = conf.ResolveProfileNoArgs(activeProfile)
-	}
-
-	if err != nil {
-		return nil, errors.Wrap(err)
-	}
-
-	return resolved, nil
 }
 
 func buildTemplates(
@@ -182,9 +165,19 @@ func Run(ctx context.Context, image string, runArgs []string, profile string) er
 		return err
 	}
 
-	resolved, err := loadResolved(ctx, profile, false)
+	conf, err := config.LoadConfig()
 	if err != nil {
-		return err
+		return errors.Wrap(err)
+	}
+
+	activeProfile := conf.Defaults.Profile
+	if profile != "" {
+		activeProfile = profile
+	}
+
+	resolved, err := conf.ResolveProfileNoArgs(activeProfile)
+	if err != nil {
+		return errors.Wrap(err)
 	}
 
 	return withDockerClient(func(cli *client.Client) error {
