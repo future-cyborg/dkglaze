@@ -20,7 +20,7 @@ udocker <command> [flags]
 
 | Command | Description |
 |---|---|
-| `build <image> [-- build-args...]` | Build the user layer on top of `<image>` |
+| `build <image> [-- build-args...]` | Build the user layer on top of `<image>` (`--pull` to pull the latest base image first) |
 | `run <image> [-- args...]` | Run the user-layer image (builds it first if it doesn't exist) |
 | `clean [-n]` | Remove all images created by udocker (`-n` for dry run) |
 | `list` | List all images created by udocker |
@@ -64,6 +64,9 @@ udocker run -p gpu-dev ubuntu:22.04
 
 udocker clean -n   # preview what would be removed
 udocker clean      # remove all udocker-managed images
+
+# Pull the latest base image before rebuilding
+udocker build --pull ubuntu:22.04
 ```
 
 ## How it works

@@ -57,7 +57,9 @@ func newDockerClient() (*client.Client, error) {
 }
 
 // Build builds the user layer on top of the image.
-func Build(ctx context.Context, image string, buildArgs []string, profile string) (retErr error) {
+//
+//nolint:revive // flag-parameter is the clearest API here
+func Build(ctx context.Context, image string, buildArgs []string, profile string, pull bool) (retErr error) {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
@@ -77,6 +79,12 @@ func Build(ctx context.Context, image string, buildArgs []string, profile string
 	}
 
 	defer func() { _ = cli.Close() }()
+
+	if pull {
+		if err := pullImage(ctx, image); err != nil {
+			return err
+		}
+	}
 
 	finalTag, intermediateTags, err := buildTemplates(ctx, resolved, image, buildArgs)
 	// Intermediate tags are temporary stepping-stone images created during the
@@ -185,7 +193,7 @@ func Run(ctx context.Context, image string, runArgs []string, profile string) er
 	if !exists {
 		logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
 
-		if err = Build(ctx, image, nil, profile); err != nil {
+		if err = Build(ctx, image, nil, profile, false); err != nil {
 			return errors.Wrap(err)
 		}
 	}
@@ -204,6 +212,13 @@ func execCommand(ctx context.Context, command []string) error {
 	cmd.Stdin = os.Stdin
 
 	return errors.Wrap(cmd.Run())
+}
+
+func pullImage(ctx context.Context, image string) error {
+	command := []string{dockerCmd, "pull", image}
+	logger.PrintColorF(logger.Cyan, "Pulling '%s'", image)
+
+	return execCommand(ctx, command)
 }
 
 // Clean removes all images made by this program.
