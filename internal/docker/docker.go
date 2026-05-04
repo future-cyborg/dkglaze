@@ -138,7 +138,6 @@ func buildTemplates(
 
 	for i, templateName := range resolved.Build.Templates {
 		resultTag := newImageName(image, resolved.Suffix+"."+strconv.Itoa(i))
-		intermediateTags = append(intermediateTags, resultTag)
 
 		t := &templateBuild{
 			resolved: resolved, name: templateName,
@@ -150,6 +149,7 @@ func buildTemplates(
 			return "", intermediateTags, errors.Wrap(err)
 		}
 
+		intermediateTags = append(intermediateTags, resultTag)
 		fromTag = resultTag
 	}
 
