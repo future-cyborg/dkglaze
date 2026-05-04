@@ -2,8 +2,11 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/alecthomas/kong"
 
@@ -14,6 +17,7 @@ import (
 
 // Context holds global CLI context.
 type Context struct {
+	Ctx     context.Context
 	Verbose bool
 }
 
@@ -28,8 +32,8 @@ func (*BuildCmd) Help() string {
 	return "Use '--' before build-args, so args prefixed with '-' get passed to docker build."
 }
 
-func (cmd *BuildCmd) Run(_ *Context) error {
-	return errors.Wrap(docker.Build(cmd.Image, cmd.BuildArgs, cmd.Profile))
+func (cmd *BuildCmd) Run(ctx *Context) error {
+	return errors.Wrap(docker.Build(ctx.Ctx, cmd.Image, cmd.BuildArgs, cmd.Profile))
 }
 
 // RunCmd is the run subcommand.
@@ -43,8 +47,8 @@ func (*RunCmd) Help() string {
 	return "Use '--' before args, so args prefixed with '-' get passed to docker run."
 }
 
-func (cmd *RunCmd) Run(_ *Context) error {
-	return errors.Wrap(docker.Run(cmd.Image, cmd.RunArgs, cmd.Profile))
+func (cmd *RunCmd) Run(ctx *Context) error {
+	return errors.Wrap(docker.Run(ctx.Ctx, cmd.Image, cmd.RunArgs, cmd.Profile))
 }
 
 // CleanCmd is the clean subcommand.
@@ -52,15 +56,15 @@ type CleanCmd struct {
 	DryRun bool `short:"n" help:"Dry run. Don't actually remove anything."`
 }
 
-func (cmd *CleanCmd) Run(_ *Context) error {
-	return errors.Wrap(docker.Clean(cmd.DryRun))
+func (cmd *CleanCmd) Run(ctx *Context) error {
+	return errors.Wrap(docker.Clean(ctx.Ctx, cmd.DryRun))
 }
 
 // ListCmd is the list subcommand.
 type ListCmd struct{}
 
-func (*ListCmd) Run(_ *Context) error {
-	return errors.Wrap(docker.List())
+func (*ListCmd) Run(ctx *Context) error {
+	return errors.Wrap(docker.List(ctx.Ctx))
 }
 
 // Cli is the root CLI struct.
@@ -75,8 +79,12 @@ type Cli struct {
 
 func main() {
 	var cli Cli
-	ctx := kong.Parse(&cli)
-	err := ctx.Run(&Context{Verbose: cli.Verbose})
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+
+	kongCtx := kong.Parse(&cli)
+	err := kongCtx.Run(&Context{Ctx: ctx, Verbose: cli.Verbose})
+	stop()
 
 	if !cli.Verbose {
 		err = errors.OuterError(err)

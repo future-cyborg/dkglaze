@@ -57,7 +57,7 @@ func newDockerClient() (*client.Client, error) {
 }
 
 // Build builds the user layer on top of the image.
-func Build(image string, buildArgs []string, profile string) (retErr error) {
+func Build(ctx context.Context, image string, buildArgs []string, profile string) (retErr error) {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
@@ -78,13 +78,13 @@ func Build(image string, buildArgs []string, profile string) (retErr error) {
 
 	defer func() { _ = cli.Close() }()
 
-	finalTag, intermediateTags, err := buildTemplates(resolved, image, buildArgs)
+	finalTag, intermediateTags, err := buildTemplates(ctx, resolved, image, buildArgs)
 	// Intermediate tags are temporary stepping-stone images created during the
 	// build pipeline. They are safe to remove on both success and failure: on
 	// success the final image has already been retagged, and on failure the
 	// partial intermediates are no longer needed.
 	defer func() {
-		if cleanupErr := cleanupTags(cli, intermediateTags); cleanupErr != nil {
+		if cleanupErr := cleanupTags(ctx, cli, intermediateTags); cleanupErr != nil {
 			retErr = errors.Join(retErr, cleanupErr)
 		}
 	}()
@@ -93,7 +93,7 @@ func Build(image string, buildArgs []string, profile string) (retErr error) {
 		return err
 	}
 
-	return tagImage(cli, finalTag, newImageName(image, resolved.Suffix))
+	return tagImage(ctx, cli, finalTag, newImageName(image, resolved.Suffix))
 }
 
 //nolint:revive // flag-parameter is the clearest API here
@@ -124,7 +124,7 @@ func loadResolved(profile string, resolveArgs bool) (*config.ResolvedConfig, err
 }
 
 func buildTemplates(
-	resolved *config.ResolvedConfig, image string, buildArgs []string,
+	ctx context.Context, resolved *config.ResolvedConfig, image string, buildArgs []string,
 ) (finalTag string, intermediateTags []string, err error) {
 	fromTag := image
 
@@ -138,7 +138,7 @@ func buildTemplates(
 			buildArgs: buildArgs,
 		}
 
-		if err := buildTemplate(t); err != nil {
+		if err := buildTemplate(ctx, t); err != nil {
 			return "", intermediateTags, errors.Wrap(err)
 		}
 
@@ -148,9 +148,7 @@ func buildTemplates(
 	return fromTag, intermediateTags, nil
 }
 
-func tagImage(cli *client.Client, from, to string) error {
-	ctx := context.Background()
-
+func tagImage(ctx context.Context, cli *client.Client, from, to string) error {
 	_, err := cli.ImageTag(ctx, client.ImageTagOptions{
 		Source: from,
 		Target: to,
@@ -160,7 +158,7 @@ func tagImage(cli *client.Client, from, to string) error {
 }
 
 // Run runs the user layer on top of the image. Builds it if it doesn't exist.
-func Run(image string, runArgs []string, profile string) error {
+func Run(ctx context.Context, image string, runArgs []string, profile string) error {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
@@ -179,18 +177,7 @@ func Run(image string, runArgs []string, profile string) error {
 
 	newImage := newImageName(image, resolved.Suffix)
 
-	if err := ensureImageExists(cli, image, newImage, profile); err != nil {
-		return err
-	}
-
-	command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs)
-	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
-
-	return execCommand(command)
-}
-
-func ensureImageExists(cli *client.Client, image, newImage, profile string) error {
-	exists, err := imageExists(cli, newImage)
+	exists, err := imageExists(ctx, cli, newImage)
 	if err != nil {
 		return errors.Wrap(err)
 	}
@@ -198,16 +185,18 @@ func ensureImageExists(cli *client.Client, image, newImage, profile string) erro
 	if !exists {
 		logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
 
-		if err = Build(image, nil, profile); err != nil {
+		if err = Build(ctx, image, nil, profile); err != nil {
 			return errors.Wrap(err)
 		}
 	}
 
-	return nil
+	command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs)
+	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
+
+	return execCommand(ctx, command)
 }
 
-func execCommand(command []string) error {
-	ctx := context.Background()
+func execCommand(ctx context.Context, command []string) error {
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // trusted config
 	cmd.Env = os.Environ()
 	cmd.Stdout = os.Stdout
@@ -220,9 +209,7 @@ func execCommand(command []string) error {
 // Clean removes all images made by this program.
 //
 //nolint:revive // flag-parameter is the clearest API here
-func Clean(dryRun bool) error {
-	ctx := context.Background()
-
+func Clean(ctx context.Context, dryRun bool) error {
 	cli, err := newDockerClient()
 	if err != nil {
 		return errors.Wrap(err)
@@ -268,9 +255,7 @@ func listUdockerImages(ctx context.Context, cli *client.Client) ([]imageapi.Summ
 }
 
 // List prints all images managed by udocker.
-func List() error {
-	ctx := context.Background()
-
+func List(ctx context.Context) error {
 	cli, err := newDockerClient()
 	if err != nil {
 		return errors.Wrap(err)
@@ -314,7 +299,7 @@ func cleanImage(ctx context.Context, cli *client.Client, image *imageapi.Summary
 	return nil
 }
 
-func buildTemplate(t *templateBuild) error {
+func buildTemplate(ctx context.Context, t *templateBuild) error {
 	tmpFile, contextDir, err := writeTemplateFile(t.name, t.fromTag)
 	if err != nil {
 		return errors.Wrap(err)
@@ -335,7 +320,6 @@ func buildTemplate(t *templateBuild) error {
 
 	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
 
-	ctx := context.Background()
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // trusted config
 
 	cmd.Stdout = os.Stdout
@@ -401,9 +385,7 @@ func executeTemplate(tmpl *template.Template, templateName, fromTag string) (str
 	return tmpFile.Name(), nil
 }
 
-func cleanupTags(cli *client.Client, tags []string) error {
-	ctx := context.Background()
-
+func cleanupTags(ctx context.Context, cli *client.Client, tags []string) error {
 	var allErr error
 
 	for _, tag := range tags {
@@ -455,9 +437,7 @@ func mountFlagsFromResolved(resolved *config.ResolvedConfig) []string {
 	return flags
 }
 
-func imageExists(cli *client.Client, image string) (bool, error) {
-	ctx := context.Background()
-
+func imageExists(ctx context.Context, cli *client.Client, image string) (bool, error) {
 	_, err := cli.ImageInspect(ctx, image)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
