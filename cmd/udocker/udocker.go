@@ -7,7 +7,6 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/future-cyborg/udocker/internal/config"
 	"github.com/future-cyborg/udocker/internal/docker"
 	"github.com/future-cyborg/udocker/internal/errors"
 	"github.com/future-cyborg/udocker/internal/logger"
@@ -16,13 +15,6 @@ import (
 // Context holds global CLI context.
 type Context struct {
 	Verbose bool
-}
-
-// InitCmd is the init subcommand.
-type InitCmd struct{}
-
-func (*InitCmd) Run(_ *Context) error {
-	return errors.Wrap(config.InitConfig())
 }
 
 // BuildCmd is the build subcommand.
@@ -73,13 +65,12 @@ func (*ListCmd) Run(_ *Context) error {
 
 // Cli is the root CLI struct.
 type Cli struct {
-	Init  InitCmd  `cmd:"" help:"Create required configuration files"`
-	Build BuildCmd `cmd:"" help:"Build user layer over docker image"`
-	Run   RunCmd   `cmd:"" help:"Run user layer docker image"`
-	Clean CleanCmd `cmd:"" help:"Remove all images made by this program"`
-	List  ListCmd  `cmd:"" help:"List all images made by this program"`
-
-	Verbose bool `help:"Enable debug mode."`
+	Config  ConfigCmd `cmd:"" help:"Manage configuration"`
+	Build   BuildCmd  `cmd:"" help:"Build user layer over docker image"`
+	Run     RunCmd    `cmd:"" help:"Run user layer docker image"`
+	Clean   CleanCmd  `cmd:"" help:"Remove all images made by this program"`
+	List    ListCmd   `cmd:"" help:"List all images made by this program"`
+	Verbose bool      `help:"Enable debug mode."`
 }
 
 func main() {

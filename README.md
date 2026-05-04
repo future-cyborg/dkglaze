@@ -20,11 +20,24 @@ udocker <command> [flags]
 
 | Command | Description |
 |---|---|
-| `init` | Create the config directory and default `config.yml` |
 | `build <image> [-- build-args...]` | Build the user layer on top of `<image>` |
 | `run <image> [-- args...]` | Run the user-layer image (builds it first if it doesn't exist) |
 | `clean [-n]` | Remove all images created by udocker (`-n` for dry run) |
 | `list` | List all images created by udocker |
+| `config` | Manage configuration (see below) |
+
+### `udocker config` subcommands
+
+| Subcommand | Description |
+|---|---|
+| `config init` | Create the config directory and default `config.yml` |
+| `config list profiles` | List all profiles and their composed features |
+| `config list features` | List all features with a count of what each contributes |
+| `config set default <profile>` | Change `defaults.profile` in the config file |
+| `config validate` | Validate the config file (schema + cross-references) |
+| `config show` | Print the raw config YAML, or `--resolved` to show computed values per profile |
+| `config edit` | Open the config file in `$EDITOR` |
+| `config path` | Print the config file path |
 
 **Global flag:** `--verbose` — shows full error stack traces.
 
@@ -33,7 +46,7 @@ udocker <command> [flags]
 ### Examples
 
 ```sh
-udocker init
+udocker config init
 udocker build ubuntu:22.04
 udocker run ubuntu:22.04
 
@@ -90,7 +103,7 @@ udocker run ubuntu:22.04 -- -e DEBUG=1
 
 ## Configuration
 
-Config lives at `~/.config/udocker/config.yml`. Run `udocker init` to create it with defaults.
+Config lives at `~/.config/udocker/config.yml`. Run `udocker config init` to create it with defaults.
 
 All configuration is organized into **features** and **profiles**. There are no top-level `build` or `run` sections.
 
