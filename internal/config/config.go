@@ -311,49 +311,52 @@ func expandTilde(path string) (string, error) {
 
 func (resolved *ResolvedConfig) populateArgs() error {
 	for i := range resolved.Build.Args {
-		if err := populateArg(&resolved.Build.Args[i]); err != nil {
+		arg := &resolved.Build.Args[i]
+
+		value, err := populateArg(arg.Value, arg.Cmd, arg)
+		if err != nil {
 			return err
 		}
+
+		arg.Value = value
 	}
 
 	return nil
 }
 
-func populateArg(buildArg *BuildArg) error {
-	if buildArg.Value != "" && buildArg.Cmd != "" {
-		return errors.Wrap(errBothValueAndCmd, buildArg)
+func populateArg(value, cmd string, buildArg *BuildArg) (string, error) {
+	if value != "" && cmd != "" {
+		return "", errors.Wrap(errBothValueAndCmd, buildArg)
 	}
 
-	if buildArg.Value == "" && buildArg.Cmd == "" {
-		return errors.Wrap(errMissingValueOrCmd, buildArg)
+	if value == "" && cmd == "" {
+		return "", errors.Wrap(errMissingValueOrCmd, buildArg)
 	}
 
-	if buildArg.Value != "" {
-		return nil
+	if value != "" {
+		return value, nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	//nolint:gosec // command is sourced from user's config file
-	cmd := exec.CommandContext(ctx, "sh", "-c", buildArg.Cmd)
-	cmd.Env = os.Environ()
+	execCmd := exec.CommandContext(ctx, "sh", "-c", cmd)
+	execCmd.Env = os.Environ()
 
 	var stderr bytes.Buffer
 
-	cmd.Stderr = &stderr
+	execCmd.Stderr = &stderr
 
-	output, err := cmd.Output()
+	output, err := execCmd.Output()
 	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg != "" {
-			return errors.Wrap(fmt.Errorf("%w: %s", errRunArgCommand, msg), buildArg)
+			return "", errors.Wrap(fmt.Errorf("%w: %s", errRunArgCommand, msg), buildArg)
 		}
 
-		return errors.Wrap(errRunArgCommand, buildArg)
+		return "", errors.Wrap(errRunArgCommand, buildArg)
 	}
 
-	buildArg.Value = strings.TrimSpace(string(output))
-
-	return nil
+	return strings.TrimSpace(string(output)), nil
 }
