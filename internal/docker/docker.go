@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/template"
 
 	"github.com/containerd/errdefs"
@@ -199,7 +200,12 @@ func Run(ctx context.Context, image string, runArgs []string, profile string) er
 		command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs)
 		logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
 
-		return execCommand(ctx, command)
+		path, err := exec.LookPath(command[0])
+		if err != nil {
+			return errors.Wrap(err)
+		}
+
+		return errors.Wrap(syscall.Exec(path, command, os.Environ())) //nolint:gosec // trusted config
 	})
 }
 
