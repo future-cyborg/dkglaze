@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -599,6 +600,185 @@ func TestResolveProfile_ResolvedSuffixIncludesProfileName(t *testing.T) {
 	want := conf.Defaults.Suffix + "-" + conf.Defaults.Profile
 	if resolved.Suffix != want {
 		t.Errorf("expected suffix %q, got %q", want, resolved.Suffix)
+	}
+}
+
+func configWithRunArgs(args string) string {
+	return `defaults:
+  suffix: test
+  profile: default
+features:
+  base:
+    build:
+      templates: []
+      args: []
+    run:
+      args:
+` + args + `
+      mounts: []
+profiles:
+  default:
+    features:
+      - base
+`
+}
+
+func writeAndResolve(t *testing.T, cfg string) (*config.ResolvedConfig, error) {
+	t.Helper()
+
+	paths, _ := config.GetConfigPaths()
+
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfile(context.Background(), "default")
+	if err != nil {
+		return nil, fmt.Errorf("resolve profile: %w", err)
+	}
+
+	return resolved, nil
+}
+
+func TestExpandRunArgs_StaticArgPassedThrough(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	resolved, err := writeAndResolve(t, configWithRunArgs("        - \"--rm\""))
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Run.Args) != 1 || resolved.Run.Args[0] != "--rm" {
+		t.Errorf("expected [--rm], got %v", resolved.Run.Args)
+	}
+}
+
+func TestExpandRunArgs_MultiWordArgIsSplit(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	resolved, err := writeAndResolve(t, configWithRunArgs("        - \"-e TERM=xterm-256color\""))
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Run.Args) != 2 || resolved.Run.Args[0] != "-e" || resolved.Run.Args[1] != "TERM=xterm-256color" {
+		t.Errorf("expected [-e TERM=xterm-256color], got %v", resolved.Run.Args)
+	}
+}
+
+func TestExpandRunArgs_EnvVarIsExpanded(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	t.Setenv("UDOCKER_TEST_WORKDIR", "/some/path")
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	resolved, err := writeAndResolve(t, configWithRunArgs("        - \"--workdir=$UDOCKER_TEST_WORKDIR\""))
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Run.Args) != 1 || resolved.Run.Args[0] != "--workdir=/some/path" {
+		t.Errorf("expected [--workdir=/some/path], got %v", resolved.Run.Args)
+	}
+}
+
+func TestExpandRunArgs_SubshellIsEvaluated(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	resolved, err := writeAndResolve(t, configWithRunArgs("        - \"-u $(id -u):$(id -g)\""))
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Run.Args) != 2 || resolved.Run.Args[0] != "-u" {
+		t.Fatalf("expected 2 args starting with -u, got %v", resolved.Run.Args)
+	}
+
+	if resolved.Run.Args[1] == "$(id -u):$(id -g)" {
+		t.Error("expected subshell to be evaluated, but it was not")
+	}
+}
+
+func TestExpandRunArgs_MultipleArgsPreserveOrder(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	args := "        - \"--rm\"\n        - \"-it\"\n        - \"-e TERM=xterm-256color\""
+	resolved, err := writeAndResolve(t, configWithRunArgs(args))
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	want := []string{"--rm", "-it", "-e", "TERM=xterm-256color"}
+	if len(resolved.Run.Args) != len(want) {
+		t.Fatalf("expected %v, got %v", want, resolved.Run.Args)
+	}
+
+	for i, w := range want {
+		if resolved.Run.Args[i] != w {
+			t.Errorf("arg[%d]: expected %q, got %q", i, w, resolved.Run.Args[i])
+		}
+	}
+}
+
+func TestExpandRunArgs_EmptyArgListReturnsNil(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	resolved, err := writeAndResolve(t, configWithRunArgs("        []"))
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Run.Args) != 0 {
+		t.Errorf("expected empty args, got %v", resolved.Run.Args)
+	}
+}
+
+func TestExpandRunArgs_FailedSubshellReturnsError(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	arg := configWithRunArgs("        - \"--arg=${UDOCKER_UNSET_VAR_XYZ?undefined variable}\"")
+	resolved, err := writeAndResolve(t, arg)
+	if err == nil {
+		t.Errorf("expected error for failed subshell, got resolved: %v", resolved)
 	}
 }
 

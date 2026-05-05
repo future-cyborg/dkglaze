@@ -211,13 +211,26 @@ func (conf *Config) ResolveProfile(ctx context.Context, name string) (*ResolvedC
 		return nil, errors.Wrap(err)
 	}
 
+	if err = resolved.expandRunArgs(ctx); err != nil {
+		return nil, errors.Wrap(err)
+	}
+
 	return resolved, nil
 }
 
 // ResolveProfileNoArgs merges the named profile's features without evaluating
 // cmd-type build args. Use this for the run command.
-func (conf *Config) ResolveProfileNoArgs(name string) (*ResolvedConfig, error) {
-	return conf.mergeProfile(name)
+func (conf *Config) ResolveProfileNoArgs(ctx context.Context, name string) (*ResolvedConfig, error) {
+	resolved, err := conf.mergeProfile(name)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = resolved.expandRunArgs(ctx); err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	return resolved, nil
 }
 
 func (conf *Config) mergeProfile(name string) (*ResolvedConfig, error) {
@@ -359,4 +372,63 @@ func populateArg(ctx context.Context, value, cmd string, buildArg *BuildArg) (st
 	}
 
 	return strings.TrimSpace(string(output)), nil
+}
+
+func (resolved *ResolvedConfig) expandRunArgs(ctx context.Context) error {
+	expanded, err := expandRunArgList(ctx, resolved.Run.Args)
+	if err != nil {
+		return err
+	}
+
+	resolved.Run.Args = expanded
+
+	return nil
+}
+
+func expandRunArgList(ctx context.Context, args []string) ([]string, error) {
+	var result []string
+
+	for _, arg := range args {
+		parts, err := shellExpandArg(ctx, arg)
+		if err != nil {
+			return nil, err
+		}
+
+		result = append(result, parts...)
+	}
+
+	return result, nil
+}
+
+func shellExpandArg(ctx context.Context, arg string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	//nolint:gosec // command is sourced from user's config file
+	execCmd := exec.CommandContext(ctx, "bash", "-c", fmt.Sprintf("set -e; printf '%%s\\n' %s", arg))
+	execCmd.Env = os.Environ()
+
+	var stderr bytes.Buffer
+
+	execCmd.Stderr = &stderr
+
+	output, err := execCmd.Output()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			return nil, errors.Wrap(fmt.Errorf("%w: %s", errRunArgCommand, msg))
+		}
+
+		return nil, errors.Wrap(errRunArgCommand)
+	}
+
+	var parts []string
+
+	for _, s := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+
+	return parts, nil
 }

@@ -175,7 +175,7 @@ func Run(ctx context.Context, image string, runArgs []string, profile string) er
 		activeProfile = profile
 	}
 
-	resolved, err := conf.ResolveProfileNoArgs(activeProfile)
+	resolved, err := conf.ResolveProfileNoArgs(ctx, activeProfile)
 	if err != nil {
 		return errors.Wrap(err)
 	}
