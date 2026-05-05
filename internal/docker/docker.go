@@ -46,6 +46,7 @@ type templateBuild struct {
 	fromTag   string
 	resultTag string
 	buildArgs []string
+	dryRun    bool
 }
 
 func newDockerClient() (*client.Client, error) {
@@ -71,7 +72,7 @@ func withDockerClient(fn func(*client.Client) error) error {
 // Build builds the user layer on top of the image.
 //
 //nolint:revive // flag-parameter is the clearest API here
-func Build(ctx context.Context, image string, buildArgs []string, profile string, pull bool) (retErr error) {
+func Build(ctx context.Context, image string, buildArgs []string, profile string, pull, dryRun bool) (retErr error) {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
@@ -108,7 +109,7 @@ func Build(ctx context.Context, image string, buildArgs []string, profile string
 		}
 	}
 
-	finalTag, intermediateTags, err := buildTemplates(ctx, resolved, image, buildArgs)
+	finalTag, intermediateTags, err := buildTemplates(ctx, resolved, image, buildArgs, dryRun)
 	// Intermediate tags are temporary stepping-stone images created during the
 	// build pipeline. They are safe to remove on both success and failure: on
 	// success the final image has already been retagged, and on failure the
@@ -123,11 +124,16 @@ func Build(ctx context.Context, image string, buildArgs []string, profile string
 		return err
 	}
 
+	if dryRun {
+		return nil
+	}
+
 	return tagImage(ctx, cli, finalTag, newImageName(image, resolved.Suffix))
 }
 
+//nolint:revive // argument-limit: dryRun is a necessary addition to this internal function
 func buildTemplates(
-	ctx context.Context, resolved *config.ResolvedConfig, image string, buildArgs []string,
+	ctx context.Context, resolved *config.ResolvedConfig, image string, buildArgs []string, dryRun bool,
 ) (finalTag string, intermediateTags []string, err error) {
 	fromTag := image
 
@@ -137,7 +143,7 @@ func buildTemplates(
 		t := &templateBuild{
 			resolved: resolved, name: templateName,
 			fromTag: fromTag, resultTag: resultTag,
-			buildArgs: buildArgs,
+			buildArgs: buildArgs, dryRun: dryRun,
 		}
 
 		if err := buildTemplate(ctx, t); err != nil {
@@ -161,7 +167,9 @@ func tagImage(ctx context.Context, cli *client.Client, from, to string) error {
 }
 
 // Run runs the user layer on top of the image. Builds it if it doesn't exist.
-func Run(ctx context.Context, image string, runArgs []string, profile string) error {
+//
+//nolint:revive // flag-parameter is the clearest API here
+func Run(ctx context.Context, image string, runArgs []string, profile string, dryRun bool) error {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
@@ -184,6 +192,13 @@ func Run(ctx context.Context, image string, runArgs []string, profile string) er
 	return withDockerClient(func(cli *client.Client) error {
 		newImage := newImageName(image, resolved.Suffix)
 
+		command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs)
+		logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
+
+		if dryRun {
+			return nil
+		}
+
 		exists, err := imageExists(ctx, cli, newImage)
 		if err != nil {
 			return errors.Wrap(err)
@@ -192,13 +207,10 @@ func Run(ctx context.Context, image string, runArgs []string, profile string) er
 		if !exists {
 			logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
 
-			if err = Build(ctx, image, nil, profile, false); err != nil {
+			if err = Build(ctx, image, nil, profile, false, false); err != nil {
 				return errors.Wrap(err)
 			}
 		}
-
-		command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs)
-		logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
 
 		path, err := exec.LookPath(command[0])
 		if err != nil {
@@ -342,6 +354,25 @@ func cleanImage(ctx context.Context, cli *client.Client, image *imageapi.Summary
 }
 
 func buildTemplate(ctx context.Context, t *templateBuild) error {
+	placeholderOrReal := "<" + t.name + ".dockerfile>"
+
+	command := []string{
+		dockerCmd, "build",
+		"--label", "com.udocker=true",
+		"-t", t.resultTag,
+		"-f", placeholderOrReal,
+	}
+
+	command = append(command, buildArgsFromResolved(t.resolved)...)
+	command = append(command, t.buildArgs...)
+
+	if t.dryRun {
+		command = append(command, "<context>")
+		logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
+
+		return nil
+	}
+
 	tmpFile, contextDir, err := writeTemplateFile(t.name, t.fromTag)
 	if err != nil {
 		return errors.Wrap(err)
@@ -349,15 +380,7 @@ func buildTemplate(ctx context.Context, t *templateBuild) error {
 
 	defer func() { _ = os.Remove(tmpFile) }()
 
-	command := []string{
-		dockerCmd, "build",
-		"--label", "com.udocker=true",
-		"-t", t.resultTag,
-		"-f", tmpFile,
-	}
-
-	command = append(command, buildArgsFromResolved(t.resolved)...)
-	command = append(command, t.buildArgs...)
+	command[7] = tmpFile
 	command = append(command, contextDir)
 
 	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))

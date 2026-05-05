@@ -28,6 +28,7 @@ type BuildCmd struct {
 	BuildArgs []string `arg:"" optional:"" name:"build-args" help:"Build arguments passed to docker build."`
 	Profile   string   `short:"p" name:"profile" help:"Profile to activate (overrides defaults.profile)."`
 	Pull      bool     `name:"pull" help:"Pull the latest base image before building."`
+	DryRun    bool     `short:"n" help:"Dry run. Print commands without executing."`
 }
 
 func (*BuildCmd) Help() string {
@@ -35,7 +36,7 @@ func (*BuildCmd) Help() string {
 }
 
 func (cmd *BuildCmd) Run(ctx *Context) error {
-	return errors.Wrap(docker.Build(ctx.Ctx, cmd.Image, cmd.BuildArgs, cmd.Profile, cmd.Pull))
+	return errors.Wrap(docker.Build(ctx.Ctx, cmd.Image, cmd.BuildArgs, cmd.Profile, cmd.Pull, cmd.DryRun))
 }
 
 // RunCmd is the run subcommand.
@@ -43,6 +44,7 @@ type RunCmd struct {
 	Image   string   `arg:"" name:"image" help:"Image to run user-layer on top of" completion:"images"`
 	RunArgs []string `arg:"" optional:"" name:"args" help:"Arguments passed to docker run"`
 	Profile string   `short:"p" name:"profile" help:"Profile to activate (overrides defaults.profile)."`
+	DryRun  bool     `short:"n" help:"Dry run. Print commands without executing."`
 }
 
 func (*RunCmd) Help() string {
@@ -50,7 +52,7 @@ func (*RunCmd) Help() string {
 }
 
 func (cmd *RunCmd) Run(ctx *Context) error {
-	return errors.Wrap(docker.Run(ctx.Ctx, cmd.Image, cmd.RunArgs, cmd.Profile))
+	return errors.Wrap(docker.Run(ctx.Ctx, cmd.Image, cmd.RunArgs, cmd.Profile, cmd.DryRun))
 }
 
 // CleanCmd is the clean subcommand.
