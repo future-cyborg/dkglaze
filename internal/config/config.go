@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,7 +32,6 @@ var (
 	errUnknownProfile    = goerrors.New("unknown profile")
 	errUnknownFeature    = goerrors.New("unknown feature")
 	errDefaultProfile    = goerrors.New("defaults.profile references unknown profile")
-	errUndefinedEnvVar   = goerrors.New("undefined environment variable in mount")
 )
 
 // Config represents the configuration.
@@ -184,12 +182,12 @@ func loadAndValidate(configFile string) (*conflate.Conflate, error) {
 func GetConfigPaths() (Paths, error) {
 	configDir := os.Getenv("UDOCKER_CONFIG_DIR")
 	if configDir == "" {
-		currentUser, err := user.Current()
+		home, err := os.UserHomeDir()
 		if err != nil {
 			return Paths{}, errors.Wrap(err)
 		}
 
-		configDir = filepath.Join(currentUser.HomeDir, ".config", "udocker")
+		configDir = filepath.Join(home, ".config", "udocker")
 	}
 
 	return Paths{
@@ -202,7 +200,7 @@ func GetConfigPaths() (Paths, error) {
 // ResolveProfile merges the named profile's features in order and evaluates
 // cmd-type build args. Use ResolveProfileNoArgs when build args are not needed.
 func (conf *Config) ResolveProfile(ctx context.Context, name string) (*ResolvedConfig, error) {
-	resolved, err := conf.mergeProfile(name)
+	resolved, err := conf.mergeProfile(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +219,7 @@ func (conf *Config) ResolveProfile(ctx context.Context, name string) (*ResolvedC
 // ResolveProfileNoArgs merges the named profile's features without evaluating
 // cmd-type build args. Use this for the run command.
 func (conf *Config) ResolveProfileNoArgs(ctx context.Context, name string) (*ResolvedConfig, error) {
-	resolved, err := conf.mergeProfile(name)
+	resolved, err := conf.mergeProfile(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +231,7 @@ func (conf *Config) ResolveProfileNoArgs(ctx context.Context, name string) (*Res
 	return resolved, nil
 }
 
-func (conf *Config) mergeProfile(name string) (*ResolvedConfig, error) {
+func (conf *Config) mergeProfile(ctx context.Context, name string) (*ResolvedConfig, error) {
 	profile, ok := conf.Profiles[name]
 	if !ok {
 		return nil, errors.Wrap(fmt.Errorf("%w: %s", errUnknownProfile, name))
@@ -251,7 +249,7 @@ func (conf *Config) mergeProfile(name string) (*ResolvedConfig, error) {
 		resolved.Build.Args = append(resolved.Build.Args, feature.Build.Args...)
 		resolved.Run.Args = append(resolved.Run.Args, feature.Run.Args...)
 
-		mounts, err := expandMounts(feature.Run.Mounts)
+		mounts, err := expandMounts(ctx, feature.Run.Mounts)
 		if err != nil {
 			return nil, errors.Wrap(err)
 		}
@@ -262,64 +260,19 @@ func (conf *Config) mergeProfile(name string) (*ResolvedConfig, error) {
 	return resolved, nil
 }
 
-func expandMounts(mounts []string) ([]string, error) {
-	if len(mounts) == 0 {
-		return nil, nil
-	}
+func expandMounts(ctx context.Context, mounts []string) ([]string, error) {
+	var result []string
 
-	expanded := make([]string, len(mounts))
-
-	for i, m := range mounts {
-		var err error
-
-		m, err = expandEnvStrict(m)
+	for _, m := range mounts {
+		parts, err := expandMountString(ctx, m)
 		if err != nil {
 			return nil, err
 		}
 
-		m, err = expandTilde(m)
-		if err != nil {
-			return nil, err
-		}
-
-		expanded[i] = m
-	}
-
-	return expanded, nil
-}
-
-func expandEnvStrict(s string) (string, error) {
-	var missingVar string
-
-	result := os.Expand(s, func(key string) string {
-		val, ok := os.LookupEnv(key)
-		if !ok {
-			missingVar = key
-
-			return ""
-		}
-
-		return val
-	})
-
-	if missingVar != "" {
-		return "", errors.Wrap(fmt.Errorf("%w: $%s", errUndefinedEnvVar, missingVar))
+		result = append(result, parts...)
 	}
 
 	return result, nil
-}
-
-func expandTilde(path string) (string, error) {
-	if !strings.HasPrefix(path, "~/") && path != "~" {
-		return path, nil
-	}
-
-	currentUser, err := user.Current()
-	if err != nil {
-		return "", errors.Wrap(err)
-	}
-
-	return currentUser.HomeDir + path[1:], nil
 }
 
 func (resolved *ResolvedConfig) populateArgs(ctx context.Context) error {
@@ -389,7 +342,7 @@ func expandRunArgList(ctx context.Context, args []string) ([]string, error) {
 	var result []string
 
 	for _, arg := range args {
-		parts, err := shellExpandArg(ctx, arg)
+		parts, err := shellExpandWordSplit(ctx, arg)
 		if err != nil {
 			return nil, err
 		}
@@ -400,12 +353,23 @@ func expandRunArgList(ctx context.Context, args []string) ([]string, error) {
 	return result, nil
 }
 
-func shellExpandArg(ctx context.Context, arg string) ([]string, error) {
+func expandMountString(ctx context.Context, s string) ([]string, error) {
+	return shellExpand(ctx, fmt.Sprintf("set -eu; __v=%s; printf '%%s\\n' \"$__v\"", s))
+}
+
+func shellExpandWordSplit(ctx context.Context, s string) ([]string, error) {
+	return shellExpand(ctx, fmt.Sprintf("set -eu; printf '%%s\\n' %s", s))
+}
+
+// shellExpand runs script through bash and returns the newline-separated output
+// as a slice. The caller is responsible for constructing the script with the
+// appropriate quoting for word-split vs no-split behavior.
+func shellExpand(ctx context.Context, script string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	//nolint:gosec // command is sourced from user's config file
-	execCmd := exec.CommandContext(ctx, "bash", "-c", fmt.Sprintf("set -e; printf '%%s\\n' %s", arg))
+	execCmd := exec.CommandContext(ctx, "bash", "-c", script)
 	execCmd.Env = os.Environ()
 
 	var stderr bytes.Buffer
@@ -424,9 +388,9 @@ func shellExpandArg(ctx context.Context, arg string) ([]string, error) {
 
 	var parts []string
 
-	for _, s := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		if s != "" {
-			parts = append(parts, s)
+	for _, p := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if p != "" {
+			parts = append(parts, p)
 		}
 	}
 

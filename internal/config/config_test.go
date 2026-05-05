@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/future-cyborg/udocker/internal/config"
@@ -383,6 +384,60 @@ profiles:
 	_, err = conf.ResolveProfile(context.Background(), "bad")
 	if err == nil {
 		t.Error("expected error for unknown feature, got nil")
+	}
+}
+
+func TestResolveProfile_MountExpandsSubshell(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: default
+features:
+  base:
+    build:
+      templates: []
+      args: []
+    run:
+      args: []
+      mounts:
+        - /etc/passwd:/etc/passwd:ro
+        - ~/.bashrc:/home/$(id -un)/.bashrc:ro
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfile(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+
+	if len(resolved.Run.Mounts) != 2 {
+		t.Fatalf("expected 2 mounts, got %d: %v", len(resolved.Run.Mounts), resolved.Run.Mounts)
+	}
+
+	if resolved.Run.Mounts[0] != "/etc/passwd:/etc/passwd:ro" {
+		t.Errorf("unexpected first mount: %q", resolved.Run.Mounts[0])
+	}
+
+	if strings.Contains(resolved.Run.Mounts[1], "$(id -un)") {
+		t.Errorf("expected subshell to be evaluated in mount, got: %q", resolved.Run.Mounts[1])
 	}
 }
 
