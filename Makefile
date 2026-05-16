@@ -103,7 +103,7 @@ $(call check_defined, SEMVER_PATCH_BUMP)
 # https://stackoverflow.com/questions/4219255/how-do-you-get-the-list-of-targets-in-a-makefile
 .PHONY: list
 list:
-	@$(MAKE) -pRrq -f $(THIS_FILE) : 2>/dev/null | awk -v RS= -F: '/^# File/,/^# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$'
+	@$(MAKE) -pRrq -f $(THIS_FILE) : 2>/dev/null | awk -F: '/^# Files/,/^# Finished Make data base/ {if ($$1 !~ "^[#. ]" && $$1 != "") {print $$1}}' | sort -u | grep -E -v -e '^[^[:alnum:]]' -e '^$@$$' -e '^Makefile$$' || true
 
 print-%: ; $(info $* is a $(flavor $*) variable set to [$($*)]) @true
 
