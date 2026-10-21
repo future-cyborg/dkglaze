@@ -50,7 +50,9 @@ udocker: unknown profile: "typo"
 udocker: /src/internal/config/config.go:226: /src/internal/config/config.go:115: unknown profile: typo
 ```
 
-**Profile flag:** `--profile <name>` (or `-p <name>`) on `build` and `run` — overrides `defaults.profile`.
+**Profile flag:** `--profile <name>` (or `-p <name>`) on `build` and `run` — overrides `defaults.profile`. Resolves against both the global config and the [project-local config](#project-local-configuration) (`./.udocker.yml`), if present.
+
+**Feature flag:** `--feature <name>` (or `-f <name>`, repeatable) on `run` only — adds a named feature's `run.args`/`run.mounts` to this invocation, without declaring a whole new profile. Also resolves against the merged global + project-local feature registry. See [Project-local configuration](#project-local-configuration) below.
 
 ### Examples
 
@@ -68,6 +70,9 @@ udocker clean      # remove all udocker-managed images
 
 # Pull the latest base image before rebuilding
 udocker build --pull ubuntu:22.04
+
+# Mix in ad-hoc features (e.g. repo mounts defined in ./.udocker.yml) without a dedicated profile
+udocker run -p default -f repos-team-a -f repos-team-c ubuntu:22.04
 ```
 
 ## Shell Completion
@@ -86,6 +91,10 @@ The zsh file **must** be named `_udocker` (leading underscore) to be picked up b
 
 Completions are generated dynamically from the CLI model. Local Docker images are listed at
 tab-press time by calling `udocker _list-images` (images managed by udocker are excluded).
+Profile names (`-p`/`--profile`) and feature names (`-f`/`--feature`) are completed the same
+way via `udocker _list-profiles` / `udocker _list-features`, which include both the global
+config and, if present, the [project-local `.udocker.yml`](#project-local-configuration) for
+the current directory.
 
 ## How it works
 
@@ -213,6 +222,52 @@ When a profile is activated, its features are merged in list order. For each fea
 - `run.mounts` are appended to the accumulated mounts list.
 
 The result is a flat build+run configuration used for that invocation.
+
+### Project-local configuration
+
+For a per-project or per-workspace set of features and profiles — e.g. a tree of cloned repos where you want to mount only a task-relevant subset into the container — `udocker` also looks for a `.udocker.yml` file in the **current directory** (the directory you run `udocker` from, not a parent or git root). It is entirely optional and additive to the global config.
+
+```yaml
+# ./.udocker.yml
+features:
+  repos-team-a:
+    run:
+      mounts:
+        - $PWD/team-a/service-x:$PWD/team-a/service-x
+        - $PWD/team-b/lib-y:$PWD/team-b/lib-y
+
+  repos-team-c:
+    run:
+      mounts:
+        - $PWD/team-c/service-z:$PWD/team-c/service-z
+
+profiles:
+  agent-a:
+    features:
+      - base          # a feature from the global config
+      - opencode      # a feature from the global config
+      - repos-team-a  # a feature defined locally, above
+```
+
+```sh
+cd ~/projects   # workspace root containing team-a/, team-b/, team-c/...
+
+# a named, reusable local profile — tab-completable, mixes global + local features
+udocker run -p agent-a myimage
+
+# or compose ad hoc, on top of a plain global profile
+udocker run -p default-no-mount myimage -f repos-team-a -f repos-team-c
+```
+
+A few rules keep this predictable and safe:
+
+- **Discovery is current-directory only** — no walking up to a parent or git root. Set `UDOCKER_LOCAL_CONFIG=/path/to/file.yml` to point at a different file explicitly; if that variable is set and the file is missing, `udocker` errors (whereas a missing default `./.udocker.yml` is simply ignored).
+- **Local features cannot define `build:`** — only `run.args`/`run.mounts`. A `build:` key under a local feature is a parse error. This keeps the project-local file (which may be committed and shared/cloned) unable to change what gets built or run arbitrary commands at build time; it can only add run-time arguments and mounts.
+- **Names must not collide** with the global config. If a local feature or profile shares a name with a global one, `udocker` errors rather than silently shadowing it.
+- **Local profiles can mix local and global features** (as in the `agent-a` example above) and work for both `udocker build -p <name>` and `udocker run -p <name>`, exactly like global profiles.
+- **`-f/--feature <name>` is `run`-only** and applies only a feature's `run.args`/`run.mounts` — its `build.*` is ignored (with a warning if present), since the image tag is derived from the *profile* name, not from `-f` selections. This means one built image is reused no matter which `-f` combination you pass at runtime.
+- **Local-sourced selections are never silent.** Whenever `run` resolves a profile or feature that came from `./.udocker.yml`, it prints a warning naming the profile/feature and the local file path, so you always know when a run depends on something outside the global config. `-n`/dry-run still prints the exact resulting command either way.
+- Both local and global feature/profile names are tab-completable (see [Shell Completion](#shell-completion)).
 
 ### Dockerfile templates
 
