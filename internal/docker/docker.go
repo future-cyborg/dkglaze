@@ -26,6 +26,10 @@ import (
 const (
 	dockerCmd    = "docker"
 	dockerRunCmd = "run"
+
+	// localConfigFallbackLabel is used in warning messages when the local
+	// config path itself cannot be determined.
+	localConfigFallbackLabel = "local config"
 )
 
 var errNoTemplates = goerrors.New("no templates specified")
@@ -176,8 +180,8 @@ func tagImage(ctx context.Context, cli *client.Client, from, to string) error {
 
 // Run runs the user layer on top of the image. Builds it if it doesn't exist.
 //
-//nolint:revive,gocognit // flag-parameter is the clearest API here; local-config merging adds necessary branching
-func Run(ctx context.Context, image string, runArgs []string, profile string, dryRun bool) error {
+//nolint:revive,gocognit,funlen // flag-parameter is clearest; local-config merging adds branching/length
+func Run(ctx context.Context, image string, runArgs []string, profile string, features []string, dryRun bool) error {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
@@ -206,6 +210,29 @@ func Run(ctx context.Context, image string, runArgs []string, profile string, dr
 	resolved, err := conf.ResolveProfileNoArgs(ctx, activeProfile)
 	if err != nil {
 		return errors.Wrap(err)
+	}
+
+	// Apply any feature-level Run configuration from -f flags
+	for _, featureName := range features {
+		args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(ctx, featureName)
+		if err != nil {
+			return errors.Wrap(err)
+		}
+
+		if hasBuild {
+			logger.PrintColorF(logger.Yellow, "feature %q has build config, which is ignored by -f on run", featureName)
+		}
+
+		if prov.Features[featureName] {
+			path, _, err := config.GetLocalConfigPath()
+			if err != nil {
+				path = localConfigFallbackLabel
+			}
+			logger.PrintColorF(logger.Yellow, "feature %q from local config %s", featureName, path)
+		}
+
+		resolved.Run.Args = append(resolved.Run.Args, args...)
+		resolved.Run.Mounts = append(resolved.Run.Mounts, mounts...)
 	}
 
 	return withDockerClient(func(cli *client.Client) error {
@@ -510,7 +537,7 @@ func newImageName(image, imageTemplate string) string {
 func warnLocalProvenance(conf *config.Config, prov *config.LocalProvenance, profileName string) {
 	path, _, err := config.GetLocalConfigPath()
 	if err != nil {
-		path = "local config"
+		path = localConfigFallbackLabel
 	}
 	if prov.Profiles[profileName] {
 		logger.PrintColorF(logger.Yellow, "using profile %q from local config %s", profileName, path)

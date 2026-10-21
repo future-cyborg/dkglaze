@@ -334,6 +334,33 @@ func (conf *Config) ResolveProfileNoArgs(ctx context.Context, name string) (*Res
 	return resolved, nil
 }
 
+// ResolveFeatureRunOnly looks up a named feature in conf.Features and returns its
+// expanded Run.Args and Run.Mounts. Build content is ignored by the caller;
+// hasBuild reports whether the feature had non-empty Build content, so callers
+// can warn. Returns errUnknownFeature if the feature name is not found.
+//
+//nolint:revive,lll // function-result-limit: args/mounts/hasBuild/err are clearer as separate return values
+func (conf *Config) ResolveFeatureRunOnly(ctx context.Context, name string) (args, mounts []string, hasBuild bool, err error) {
+	feature, ok := conf.Features[name]
+	if !ok {
+		return nil, nil, false, errors.Wrap(fmt.Errorf("%w: %s", errUnknownFeature, name))
+	}
+
+	hasBuild = len(feature.Build.Templates) > 0 || len(feature.Build.Args) > 0
+
+	expandedArgs, err := expandRunArgList(ctx, feature.Run.Args)
+	if err != nil {
+		return nil, nil, hasBuild, errors.Wrap(err)
+	}
+
+	expandedMounts, err := expandMounts(ctx, feature.Run.Mounts)
+	if err != nil {
+		return nil, nil, hasBuild, errors.Wrap(err)
+	}
+
+	return expandedArgs, expandedMounts, hasBuild, nil
+}
+
 func (conf *Config) mergeProfile(ctx context.Context, name string) (*ResolvedConfig, error) {
 	profile, ok := conf.Profiles[name]
 	if !ok {

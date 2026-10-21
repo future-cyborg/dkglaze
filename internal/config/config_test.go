@@ -1460,3 +1460,245 @@ func TestMergeLocal_EmptyLocalConfigIsNoop(t *testing.T) {
 		t.Errorf("expected empty prov.Profiles")
 	}
 }
+
+func TestResolveFeatureRunOnly_ReturnsExpandedArgsAndMounts(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	paths, _ := config.GetConfigPaths()
+	cfg := `defaults:
+  suffix: test
+  profile: default
+features:
+  myfeat:
+    build:
+      templates: []
+      args: []
+    run:
+      args:
+        - --rm
+        - -it
+        - -e HOME=$HOME
+      mounts:
+        - /host:/container
+        - ~/.bashrc:/etc/bashrc:ro
+profiles:
+  default:
+    features:
+      - base
+`
+	if err := os.WriteFile(paths.ConfigFile, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "myfeat")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if hasBuild {
+		t.Error("expected hasBuild to be false")
+	}
+
+	// Args are word-split by the shell expansion, so "-e HOME=$HOME" becomes ["-e", "HOME=/root"]
+	if len(args) != 4 {
+		t.Fatalf("expected 4 args (word-split), got %d: %v", len(args), args)
+	}
+
+	if args[0] != "--rm" || args[1] != "-it" || args[2] != "-e" {
+		t.Errorf("expected first three args to be --rm, -it, and -e, got %v", args[:3])
+	}
+
+	// Fourth arg should have $HOME expanded
+	if !strings.Contains(args[3], "HOME=") || strings.Contains(args[3], "$HOME") {
+		t.Errorf("expected HOME=$HOME to be expanded in arg, got: %q", args[3])
+	}
+
+	if len(mounts) != 2 {
+		t.Fatalf("expected 2 mounts, got %d: %v", len(mounts), mounts)
+	}
+
+	if mounts[0] != "/host:/container" {
+		t.Errorf("expected first mount to be /host:/container, got %q", mounts[0])
+	}
+
+	// Second mount should have ~ expanded
+	if mounts[1] == "~/.bashrc:/etc/bashrc:ro" || strings.Contains(mounts[1], "~") {
+		t.Errorf("expected ~ to be expanded in mount, got: %q", mounts[1])
+	}
+}
+
+func TestResolveFeatureRunOnly_UnknownFeatureReturnsError(t *testing.T) {
+	cleanup := withTempConfigDir(t)
+	defer cleanup()
+
+	if err := config.InitConfig(); err != nil {
+		t.Fatalf("init error: %v", err)
+	}
+
+	conf, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+
+	_, _, _, err = conf.ResolveFeatureRunOnly(context.Background(), "nonexistent-feature")
+	if err == nil {
+		t.Fatal("expected error for unknown feature, got nil")
+	}
+
+	// The error should mention the unknown feature error in its chain
+	// (it's wrapped with the feature name, similar to ResolveProfile behavior)
+	if !strings.Contains(err.Error(), "unknown feature") {
+		t.Errorf("expected error to mention 'unknown feature', got: %v", err)
+	}
+}
+
+func TestResolveFeatureRunOnly_HasBuildTrueWhenTemplatesPresent(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"build-feat": {
+				Build: config.Build{
+					Templates: []string{"base.dockerfile"},
+					Args:      []config.BuildArg{},
+				},
+				Run: config.Run{
+					Args:   []string{"--rm"},
+					Mounts: []string{},
+				},
+			},
+		},
+	}
+
+	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "build-feat")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !hasBuild {
+		t.Error("expected hasBuild to be true when Build.Templates is present")
+	}
+
+	if len(args) != 1 || args[0] != "--rm" {
+		t.Errorf("expected args to contain only Run content, got %v", args)
+	}
+
+	if len(mounts) != 0 {
+		t.Errorf("expected mounts to be empty, got %v", mounts)
+	}
+}
+
+func TestResolveFeatureRunOnly_HasBuildTrueWhenArgsPresent(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"build-feat": {
+				Build: config.Build{
+					Templates: []string{},
+					Args: []config.BuildArg{
+						{Key: "VERSION", Value: "1.0"},
+					},
+				},
+				Run: config.Run{
+					Args:   []string{"-it"},
+					Mounts: []string{},
+				},
+			},
+		},
+	}
+
+	args, _, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "build-feat")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !hasBuild {
+		t.Error("expected hasBuild to be true when Build.Args is present")
+	}
+
+	if len(args) != 1 || args[0] != "-it" {
+		t.Errorf("expected args to contain only Run content, got %v", args)
+	}
+}
+
+func TestResolveFeatureRunOnly_HasBuildFalseWhenBuildEmpty(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"run-only": {
+				Build: config.Build{
+					Templates: []string{},
+					Args:      []config.BuildArg{},
+				},
+				Run: config.Run{
+					Args:   []string{"--rm"},
+					Mounts: []string{"/data:/data"},
+				},
+			},
+		},
+	}
+
+	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "run-only")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if hasBuild {
+		t.Error("expected hasBuild to be false when Build content is empty")
+	}
+
+	if len(args) != 1 || args[0] != "--rm" {
+		t.Errorf("expected args to contain only --rm, got %v", args)
+	}
+
+	if len(mounts) != 1 || mounts[0] != "/data:/data" {
+		t.Errorf("expected mounts to contain only /data:/data, got %v", mounts)
+	}
+}
+
+func TestResolveFeatureRunOnly_IgnoresBuildContent(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"mixed": {
+				Build: config.Build{
+					Templates: []string{"base.dockerfile", "app.dockerfile"},
+					Args: []config.BuildArg{
+						{Key: "VERSION", Value: "2.0"},
+						{Key: "ENV", Value: "prod"},
+					},
+				},
+				Run: config.Run{
+					Args:   []string{"--rm", "-it"},
+					Mounts: []string{"/app:/app"},
+				},
+			},
+		},
+	}
+
+	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "mixed")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !hasBuild {
+		t.Error("expected hasBuild to be true")
+	}
+
+	// Verify only Run content is returned
+	if len(args) != 2 || args[0] != "--rm" || args[1] != "-it" {
+		t.Errorf("expected args to be [--rm -it], got %v", args)
+	}
+
+	if len(mounts) != 1 || mounts[0] != "/app:/app" {
+		t.Errorf("expected mounts to be [/app:/app], got %v", mounts)
+	}
+
+	// Build content should never appear in the returned values
+	// (structurally confirmed by the return signature not including Build)
+}
