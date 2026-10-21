@@ -33,6 +33,9 @@ var (
 	errUnknownProfile    = goerrors.New("unknown profile")
 	errUnknownFeature    = goerrors.New("unknown feature")
 	errDefaultProfile    = goerrors.New("defaults.profile references unknown profile")
+
+	// ErrLocalNameCollision is returned when a local config name collides with a global one.
+	ErrLocalNameCollision = goerrors.New("name already defined in global config")
 )
 
 // Config represents the configuration.
@@ -72,6 +75,13 @@ type LocalFeature struct {
 type LocalConfig struct {
 	Features map[string]LocalFeature `yaml:"features"`
 	Profiles map[string]Profile      `yaml:"profiles"`
+}
+
+// LocalProvenance records which feature/profile names in a merged Config
+// originated from the local project-tree config file.
+type LocalProvenance struct {
+	Features map[string]bool
+	Profiles map[string]bool
 }
 
 // Build represents build configuration.
@@ -259,6 +269,35 @@ func LoadLocalConfig() (*LocalConfig, error) {
 	}
 
 	return &local, nil
+}
+
+// MergeLocal merges local into conf, erroring if any local feature or
+// profile name collides with an existing global one. It returns a
+// LocalProvenance recording which names came from local.
+func (conf *Config) MergeLocal(local *LocalConfig) (*LocalProvenance, error) {
+	prov := &LocalProvenance{Features: map[string]bool{}, Profiles: map[string]bool{}}
+	for name, lf := range local.Features {
+		if _, exists := conf.Features[name]; exists {
+			return nil, errors.Wrap(fmt.Errorf("%w: feature %q", ErrLocalNameCollision, name))
+		}
+		if conf.Features == nil {
+			conf.Features = map[string]Feature{}
+		}
+		conf.Features[name] = Feature{Run: lf.Run}
+		prov.Features[name] = true
+	}
+	for name, lp := range local.Profiles {
+		if _, exists := conf.Profiles[name]; exists {
+			return nil, errors.Wrap(fmt.Errorf("%w: profile %q", ErrLocalNameCollision, name))
+		}
+		if conf.Profiles == nil {
+			conf.Profiles = map[string]Profile{}
+		}
+		conf.Profiles[name] = lp
+		prov.Profiles[name] = true
+	}
+
+	return prov, nil
 }
 
 // ResolveProfile merges the named profile's features in order and evaluates

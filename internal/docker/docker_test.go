@@ -368,3 +368,85 @@ func TestMountFlagsFromResolved(t *testing.T) {
 		}
 	})
 }
+
+func TestWarnLocalProvenance_NoWarningWhenGlobal(t *testing.T) {
+	// Test that no warning is produced when profile/features come from global config
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"base": {Run: config.Run{Args: []string{"--rm"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	// Empty provenance — nothing came from local
+	prov := &config.LocalProvenance{
+		Features: map[string]bool{},
+		Profiles: map[string]bool{},
+	}
+
+	// This should not panic and should not produce warnings
+	docker.ExportedWarnLocalProvenance(conf, prov, "default")
+}
+
+func TestWarnLocalProvenance_WarnsWhenProfileFromLocal(t *testing.T) {
+	// Test that warning is produced when profile comes from local config
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"base": {Run: config.Run{Args: []string{"--rm"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"local-profile": {Features: []string{"base"}},
+		},
+	}
+
+	prov := &config.LocalProvenance{
+		Features: map[string]bool{},
+		Profiles: map[string]bool{"local-profile": true},
+	}
+
+	// This should not panic
+	docker.ExportedWarnLocalProvenance(conf, prov, "local-profile")
+}
+
+func TestWarnLocalProvenance_WarnsWhenFeatureFromLocal(t *testing.T) {
+	// Test that warning is produced when a feature in the profile comes from local
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"base":          {Run: config.Run{Args: []string{"--rm"}}},
+			"local-feature": {Run: config.Run{Mounts: []string{"/local:/local"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base", "local-feature"}},
+		},
+	}
+
+	prov := &config.LocalProvenance{
+		Features: map[string]bool{"local-feature": true},
+		Profiles: map[string]bool{},
+	}
+
+	// This should not panic
+	docker.ExportedWarnLocalProvenance(conf, prov, "default")
+}
+
+func TestWarnLocalProvenance_IgnoresUnknownProfile(t *testing.T) {
+	// Test that when profile name doesn't exist in conf, function returns gracefully
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"base": {Run: config.Run{Args: []string{"--rm"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	prov := &config.LocalProvenance{
+		Features: map[string]bool{},
+		Profiles: map[string]bool{"nonexistent": true},
+	}
+
+	// This should not panic even though "nonexistent" is not in conf
+	docker.ExportedWarnLocalProvenance(conf, prov, "nonexistent")
+}

@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	goerrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1238,5 +1239,224 @@ profiles:
 
 	if agentA.Features[0] != "base" || agentA.Features[1] != "repos-team-a" {
 		t.Errorf("expected features [base repos-team-a], got %v", agentA.Features)
+	}
+}
+
+func TestMergeLocal_AddsNewFeaturesAndProfiles(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"base": {
+				Build: config.Build{Templates: []string{"base.dockerfile"}},
+				Run:   config.Run{Args: []string{"--rm"}},
+			},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	local := &config.LocalConfig{
+		Features: map[string]config.LocalFeature{
+			"local-feature": {
+				Run: config.Run{Mounts: []string{"/local:/local"}},
+			},
+		},
+		Profiles: map[string]config.Profile{
+			"local-profile": {Features: []string{"base", "local-feature"}},
+		},
+	}
+
+	prov, err := conf.MergeLocal(local)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if prov == nil {
+		t.Fatal("expected non-nil LocalProvenance")
+	}
+
+	// Check that new feature was added
+	if _, ok := conf.Features["local-feature"]; !ok {
+		t.Errorf("expected local-feature to be added to conf.Features")
+	}
+
+	if conf.Features["local-feature"].Run.Mounts[0] != "/local:/local" {
+		t.Errorf("expected local-feature mount to be set")
+	}
+
+	// Check that new profile was added
+	if _, ok := conf.Profiles["local-profile"]; !ok {
+		t.Errorf("expected local-profile to be added to conf.Profiles")
+	}
+
+	// Check provenance
+	if !prov.Features["local-feature"] {
+		t.Errorf("expected prov.Features[local-feature] to be true")
+	}
+
+	if !prov.Profiles["local-profile"] {
+		t.Errorf("expected prov.Profiles[local-profile] to be true")
+	}
+
+	// Check that old items are NOT marked in provenance
+	if prov.Features["base"] {
+		t.Errorf("expected prov.Features[base] to be false")
+	}
+
+	if prov.Profiles["default"] {
+		t.Errorf("expected prov.Profiles[default] to be false")
+	}
+}
+
+func TestMergeLocal_FeatureCollisionReturnsError(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"base": {
+				Build: config.Build{Templates: []string{"base.dockerfile"}},
+				Run:   config.Run{Args: []string{"--rm"}},
+			},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	local := &config.LocalConfig{
+		Features: map[string]config.LocalFeature{
+			"base": { // collision with global feature
+				Run: config.Run{Mounts: []string{"/local:/local"}},
+			},
+		},
+		Profiles: map[string]config.Profile{},
+	}
+
+	prov, err := conf.MergeLocal(local)
+	if err == nil {
+		t.Fatalf("expected error for feature collision, got nil (prov: %v)", prov)
+	}
+
+	// Check that error wraps ErrLocalNameCollision
+	if !goerrors.Is(err, config.ErrLocalNameCollision) {
+		t.Errorf("expected error to wrap ErrLocalNameCollision")
+	}
+}
+
+func TestMergeLocal_ProfileCollisionReturnsError(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"base": {
+				Build: config.Build{Templates: []string{"base.dockerfile"}},
+				Run:   config.Run{Args: []string{"--rm"}},
+			},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	local := &config.LocalConfig{
+		Features: map[string]config.LocalFeature{},
+		Profiles: map[string]config.Profile{
+			"default": { // collision with global profile
+				Features: []string{"base"},
+			},
+		},
+	}
+
+	prov, err := conf.MergeLocal(local)
+	if err == nil {
+		t.Fatalf("expected error for profile collision, got nil (prov: %v)", prov)
+	}
+
+	// Check that error wraps ErrLocalNameCollision
+	if !goerrors.Is(err, config.ErrLocalNameCollision) {
+		t.Errorf("expected error to wrap ErrLocalNameCollision")
+	}
+}
+
+func TestMergeLocal_LocalFeatureBuildIsEmpty(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"base": {
+				Build: config.Build{Templates: []string{"base.dockerfile"}},
+				Run:   config.Run{Args: []string{"--rm"}},
+			},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	local := &config.LocalConfig{
+		Features: map[string]config.LocalFeature{
+			"local-feature": {
+				Run: config.Run{Mounts: []string{"/local:/local"}},
+			},
+		},
+		Profiles: map[string]config.Profile{},
+	}
+
+	prov, err := conf.MergeLocal(local)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	merged := conf.Features["local-feature"]
+	if len(merged.Build.Templates) != 0 {
+		t.Errorf("expected Build.Templates to be empty, got %v", merged.Build.Templates)
+	}
+
+	if len(merged.Build.Args) != 0 {
+		t.Errorf("expected Build.Args to be empty, got %v", merged.Build.Args)
+	}
+
+	if !prov.Features["local-feature"] {
+		t.Errorf("expected feature to be marked in provenance")
+	}
+}
+
+func TestMergeLocal_EmptyLocalConfigIsNoop(t *testing.T) {
+	originalFeatures := map[string]config.Feature{
+		"base": {
+			Build: config.Build{Templates: []string{"base.dockerfile"}},
+			Run:   config.Run{Args: []string{"--rm"}},
+		},
+	}
+	originalProfiles := map[string]config.Profile{
+		"default": {Features: []string{"base"}},
+	}
+
+	conf := &config.Config{
+		Features: originalFeatures,
+		Profiles: originalProfiles,
+	}
+
+	empty := &config.LocalConfig{}
+
+	prov, err := conf.MergeLocal(empty)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if prov == nil {
+		t.Fatal("expected non-nil LocalProvenance")
+	}
+
+	// Check that Features and Profiles unchanged
+	if len(conf.Features) != 1 || conf.Features["base"].Run.Args[0] != "--rm" {
+		t.Errorf("expected Features to be unchanged")
+	}
+
+	if len(conf.Profiles) != 1 || conf.Profiles["default"].Features[0] != "base" {
+		t.Errorf("expected Profiles to be unchanged")
+	}
+
+	// Check that provenance is empty but non-nil
+	if len(prov.Features) != 0 {
+		t.Errorf("expected empty prov.Features")
+	}
+
+	if len(prov.Profiles) != 0 {
+		t.Errorf("expected empty prov.Profiles")
 	}
 }

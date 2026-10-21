@@ -82,6 +82,14 @@ func Build(ctx context.Context, image string, buildArgs []string, profile string
 		return errors.Wrap(err)
 	}
 
+	local, err := config.LoadLocalConfig()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+	if _, err := conf.MergeLocal(local); err != nil {
+		return errors.Wrap(err)
+	}
+
 	activeProfile := conf.Defaults.Profile
 	if profile != "" {
 		activeProfile = profile
@@ -168,7 +176,7 @@ func tagImage(ctx context.Context, cli *client.Client, from, to string) error {
 
 // Run runs the user layer on top of the image. Builds it if it doesn't exist.
 //
-//nolint:revive // flag-parameter is the clearest API here
+//nolint:revive,gocognit // flag-parameter is the clearest API here; local-config merging adds necessary branching
 func Run(ctx context.Context, image string, runArgs []string, profile string, dryRun bool) error {
 	if err := validateImageRef(image); err != nil {
 		return err
@@ -179,10 +187,21 @@ func Run(ctx context.Context, image string, runArgs []string, profile string, dr
 		return errors.Wrap(err)
 	}
 
+	local, err := config.LoadLocalConfig()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+	prov, err := conf.MergeLocal(local)
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
 	activeProfile := conf.Defaults.Profile
 	if profile != "" {
 		activeProfile = profile
 	}
+
+	warnLocalProvenance(conf, prov, activeProfile)
 
 	resolved, err := conf.ResolveProfileNoArgs(ctx, activeProfile)
 	if err != nil {
@@ -482,6 +501,29 @@ func newImageName(image, imageTemplate string) string {
 	}
 
 	return fmt.Sprintf("%s-%s:%s", image[:lastColon], imageTemplate, image[lastColon+1:])
+}
+
+// warnLocalProvenance prints a loud, non-blocking warning whenever the
+// resolved profile or any of its features originated from the local
+// project-tree config file, so a run never silently depends on
+// local-sourced configuration.
+func warnLocalProvenance(conf *config.Config, prov *config.LocalProvenance, profileName string) {
+	path, _, err := config.GetLocalConfigPath()
+	if err != nil {
+		path = "local config"
+	}
+	if prov.Profiles[profileName] {
+		logger.PrintColorF(logger.Yellow, "using profile %q from local config %s", profileName, path)
+	}
+	p, ok := conf.Profiles[profileName]
+	if !ok {
+		return
+	}
+	for _, featureName := range p.Features {
+		if prov.Features[featureName] {
+			logger.PrintColorF(logger.Yellow, "feature %q from local config %s", featureName, path)
+		}
+	}
 }
 
 func buildArgsFromResolved(resolved *config.ResolvedConfig) []string {

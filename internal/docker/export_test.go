@@ -25,3 +25,7 @@ func ExportedWriteTemplateFile(templateName, fromTag string) (tempFile, contextD
 func ExportedValidateImageRef(image string) error {
 	return validateImageRef(image)
 }
+
+func ExportedWarnLocalProvenance(conf *config.Config, prov *config.LocalProvenance, profileName string) {
+	warnLocalProvenance(conf, prov, profileName)
+}
