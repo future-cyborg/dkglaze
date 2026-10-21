@@ -1042,3 +1042,201 @@ profiles:
 		t.Error("expected ~ to be expanded, but it was not")
 	}
 }
+
+func TestGetLocalConfigPath_DefaultsToCwd(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	t.Setenv("UDOCKER_LOCAL_CONFIG", "")
+
+	path, explicit, err := config.GetLocalConfigPath()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedPath := filepath.Join(tmpDir, ".udocker.yml")
+	if path != expectedPath {
+		t.Errorf("expected path %q, got %q", expectedPath, path)
+	}
+
+	if explicit {
+		t.Error("expected explicit to be false, got true")
+	}
+}
+
+func TestGetLocalConfigPath_UsesEnvOverride(t *testing.T) {
+	envPath := "/some/explicit/path.yml"
+	t.Setenv("UDOCKER_LOCAL_CONFIG", envPath)
+
+	path, explicit, err := config.GetLocalConfigPath()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if path != envPath {
+		t.Errorf("expected path %q, got %q", envPath, path)
+	}
+
+	if !explicit {
+		t.Error("expected explicit to be true, got false")
+	}
+}
+
+func TestLoadLocalConfig_NoFileReturnsEmptyConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+	t.Setenv("UDOCKER_LOCAL_CONFIG", "")
+
+	local, err := config.LoadLocalConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if local == nil {
+		t.Fatal("expected non-nil LocalConfig, got nil")
+	}
+
+	if len(local.Features) > 0 {
+		t.Errorf("expected empty Features, got %v", local.Features)
+	}
+
+	if len(local.Profiles) > 0 {
+		t.Errorf("expected empty Profiles, got %v", local.Profiles)
+	}
+}
+
+func TestLoadLocalConfig_ExplicitEnvPathMissingReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	nonexistentPath := filepath.Join(tmpDir, "does-not-exist.yml")
+	t.Setenv("UDOCKER_LOCAL_CONFIG", nonexistentPath)
+
+	local, err := config.LoadLocalConfig()
+	if err == nil {
+		t.Fatalf("expected error for missing explicit path, got nil (local: %v)", local)
+	}
+}
+
+func TestLoadLocalConfig_MalformedYAMLReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yml")
+
+	malformedYAML := `features: [this is not: valid: yaml`
+	if err := os.WriteFile(configPath, []byte(malformedYAML), 0o600); err != nil {
+		t.Fatalf("failed to write malformed YAML: %v", err)
+	}
+
+	t.Setenv("UDOCKER_LOCAL_CONFIG", configPath)
+
+	local, err := config.LoadLocalConfig()
+	if err == nil {
+		t.Fatalf("expected error for malformed YAML, got nil (local: %v)", local)
+	}
+}
+
+func TestLoadLocalConfig_BuildKeyUnderFeatureReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yml")
+
+	yamlWithBuild := `features:
+  myfeature:
+    build:
+      templates: ["foo"]
+    run:
+      mounts: ["/a:/a"]
+`
+	if err := os.WriteFile(configPath, []byte(yamlWithBuild), 0o600); err != nil {
+		t.Fatalf("failed to write YAML: %v", err)
+	}
+
+	t.Setenv("UDOCKER_LOCAL_CONFIG", configPath)
+
+	local, err := config.LoadLocalConfig()
+	if err == nil {
+		t.Fatalf("expected error for build key in LocalFeature, got nil (local: %v)", local)
+	}
+}
+
+func TestLoadLocalConfig_ParsesFeaturesAndProfiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yml")
+
+	validYAML := `features:
+  repos-team-a:
+    run:
+      mounts:
+        - /host/a:/container/a
+        - /host/b:/container/b
+  repos-team-c:
+    run:
+      args: ["--env", "FOO=bar"]
+profiles:
+  agent-a:
+    features: [base, repos-team-a]
+`
+	if err := os.WriteFile(configPath, []byte(validYAML), 0o600); err != nil {
+		t.Fatalf("failed to write YAML: %v", err)
+	}
+
+	t.Setenv("UDOCKER_LOCAL_CONFIG", configPath)
+
+	local, err := config.LoadLocalConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if local == nil {
+		t.Fatal("expected non-nil LocalConfig")
+	}
+
+	// Check features
+	if len(local.Features) != 2 {
+		t.Errorf("expected 2 features, got %d", len(local.Features))
+	}
+
+	teamA, ok := local.Features["repos-team-a"]
+	if !ok {
+		t.Fatalf("expected repos-team-a feature")
+	}
+
+	if len(teamA.Run.Mounts) != 2 {
+		t.Errorf("expected 2 mounts in repos-team-a, got %d: %v", len(teamA.Run.Mounts), teamA.Run.Mounts)
+	}
+
+	if teamA.Run.Mounts[0] != "/host/a:/container/a" {
+		t.Errorf("expected first mount /host/a:/container/a, got %q", teamA.Run.Mounts[0])
+	}
+
+	if teamA.Run.Mounts[1] != "/host/b:/container/b" {
+		t.Errorf("expected second mount /host/b:/container/b, got %q", teamA.Run.Mounts[1])
+	}
+
+	teamC, ok := local.Features["repos-team-c"]
+	if !ok {
+		t.Fatalf("expected repos-team-c feature")
+	}
+
+	if len(teamC.Run.Args) != 2 {
+		t.Errorf("expected 2 args in repos-team-c, got %d: %v", len(teamC.Run.Args), teamC.Run.Args)
+	}
+
+	if teamC.Run.Args[0] != "--env" || teamC.Run.Args[1] != "FOO=bar" {
+		t.Errorf("expected args [--env FOO=bar], got %v", teamC.Run.Args)
+	}
+
+	// Check profiles
+	if len(local.Profiles) != 1 {
+		t.Errorf("expected 1 profile, got %d", len(local.Profiles))
+	}
+
+	agentA, ok := local.Profiles["agent-a"]
+	if !ok {
+		t.Fatalf("expected agent-a profile")
+	}
+
+	if len(agentA.Features) != 2 {
+		t.Errorf("expected 2 features in agent-a, got %d: %v", len(agentA.Features), agentA.Features)
+	}
+
+	if agentA.Features[0] != "base" || agentA.Features[1] != "repos-team-a" {
+		t.Errorf("expected features [base repos-team-a], got %v", agentA.Features)
+	}
+}

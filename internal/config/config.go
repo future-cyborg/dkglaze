@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/the4thamigo-uk/conflate"
+	"gopkg.in/yaml.v3"
 
 	"github.com/future-cyborg/udocker/internal/errors"
 	"github.com/future-cyborg/udocker/internal/logger"
@@ -56,6 +57,21 @@ type Feature struct {
 // Profile represents a named combination of features.
 type Profile struct {
 	Features []string `yaml:"features"`
+}
+
+// LocalFeature represents a named run-only bundle that may be defined in the
+// project-local config file. It intentionally has no Build field: local
+// features cannot contribute build templates or build args.
+type LocalFeature struct {
+	Run Run `yaml:"run"`
+}
+
+// LocalConfig represents the project-local config file ($PWD/.udocker.yml).
+// It is parsed independently of the global Config — not validated against
+// schema.json and not merged via conflate.
+type LocalConfig struct {
+	Features map[string]LocalFeature `yaml:"features"`
+	Profiles map[string]Profile      `yaml:"profiles"`
 }
 
 // Build represents build configuration.
@@ -195,6 +211,54 @@ func GetConfigPaths() (Paths, error) {
 		ConfigFile:   filepath.Join(configDir, "config.yml"),
 		TemplatesDir: filepath.Join(configDir, "templates"),
 	}, nil
+}
+
+// GetLocalConfigPath returns the path to the project-local config file and whether
+// the path was explicitly set via the UDOCKER_LOCAL_CONFIG environment variable.
+// If the env var is set, the path is explicit and a missing file is an error.
+// If the env var is not set, the path defaults to $PWD/.udocker.yml and a missing
+// file is a silent no-op (not an error).
+func GetLocalConfigPath() (path string, explicit bool, err error) {
+	envPath := os.Getenv("UDOCKER_LOCAL_CONFIG")
+	if envPath != "" {
+		return envPath, true, nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", false, errors.Wrap(err)
+	}
+
+	return filepath.Join(cwd, ".udocker.yml"), false, nil
+}
+
+// LoadLocalConfig loads the project-local config file. It is parsed independently
+// of the global Config — not validated against schema.json and not merged via
+// conflate. Strict YAML decoding rejects unknown fields.
+func LoadLocalConfig() (*LocalConfig, error) {
+	path, explicit, err := GetLocalConfigPath()
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	data, err := os.ReadFile(path) //nolint:gosec // path is from env var or cwd, user-controlled
+	if err != nil {
+		if goerrors.Is(err, os.ErrNotExist) && !explicit {
+			// Default path (.udocker.yml in cwd) not found is not an error.
+			return &LocalConfig{}, nil
+		}
+
+		return nil, errors.Wrap(err)
+	}
+
+	var local LocalConfig
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&local); err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	return &local, nil
 }
 
 // ResolveProfile merges the named profile's features in order and evaluates
