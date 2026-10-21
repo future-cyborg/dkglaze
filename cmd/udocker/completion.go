@@ -26,16 +26,19 @@ type cmdMeta struct {
 }
 
 type flagMeta struct {
-	Long   string
-	Short  rune
-	IsBool bool
+	Long       string
+	Short      rune
+	IsBool     bool
+	Completion string
 }
 
 type completionData struct {
-	AppName           string
-	FnName            string
-	Cmds              []cmdMeta
-	ValueFlagPatterns []string
+	AppName             string
+	FnName              string
+	Cmds                []cmdMeta
+	ValueFlagPatterns   []string
+	ProfileFlagPatterns []string
+	FeatureFlagPatterns []string
 }
 
 // --- model collection ---
@@ -45,7 +48,12 @@ func flagMetaFromNode(node *kong.Node) []flagMeta {
 
 	for _, f := range node.Flags {
 		if !f.Hidden {
-			out = append(out, flagMeta{Long: f.Name, Short: f.Short, IsBool: f.IsBool()})
+			out = append(out, flagMeta{
+				Long:       f.Name,
+				Short:      f.Short,
+				IsBool:     f.IsBool(),
+				Completion: f.Tag.Get("completion"),
+			})
 		}
 	}
 
@@ -124,7 +132,7 @@ func childNames(children []cmdMeta) []string {
 	return names
 }
 
-func addValueFlagPatterns(f flagMeta, seen map[string]bool, pats *[]string) {
+func addFlagPatterns(f flagMeta, seen map[string]bool, pats *[]string) {
 	if f.IsBool {
 		return
 	}
@@ -144,14 +152,16 @@ func addValueFlagPatterns(f flagMeta, seen map[string]bool, pats *[]string) {
 	}
 }
 
-func collectValueFlagPatterns(cmds []cmdMeta) []string {
+func collectFlagPatterns(cmds []cmdMeta, match func(flagMeta) bool) []string {
 	var pats []string
 
 	seen := map[string]bool{}
 
 	for _, c := range cmds {
 		for _, f := range c.Flags {
-			addValueFlagPatterns(f, seen, &pats)
+			if match(f) {
+				addFlagPatterns(f, seen, &pats)
+			}
 		}
 	}
 
@@ -194,10 +204,12 @@ func generateCompletion(shell string, app *kong.Application) (string, error) {
 
 	fnName := "_" + strings.ReplaceAll(app.Name, "-", "_") + "_completions"
 	data := completionData{
-		AppName:           app.Name,
-		FnName:            fnName,
-		Cmds:              cmds,
-		ValueFlagPatterns: collectValueFlagPatterns(cmds),
+		AppName:             app.Name,
+		FnName:              fnName,
+		Cmds:                cmds,
+		ValueFlagPatterns:   collectFlagPatterns(cmds, func(f flagMeta) bool { return f.Completion == "" }),
+		ProfileFlagPatterns: collectFlagPatterns(cmds, func(f flagMeta) bool { return f.Completion == "profiles" }),
+		FeatureFlagPatterns: collectFlagPatterns(cmds, func(f flagMeta) bool { return f.Completion == "features" }),
 	}
 
 	t, err := template.New(shell).Funcs(fnMap).Parse(tmplStr)

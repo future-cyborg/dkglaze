@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"syscall"
 
 	"github.com/alecthomas/kong"
 
+	"github.com/future-cyborg/udocker/internal/config"
 	"github.com/future-cyborg/udocker/internal/docker"
 	"github.com/future-cyborg/udocker/internal/errors"
 	"github.com/future-cyborg/udocker/internal/logger"
@@ -26,7 +28,7 @@ type Context struct {
 type BuildCmd struct {
 	Image     string   `arg:"" name:"image" help:"Image to build FROM" completion:"images"`
 	BuildArgs []string `arg:"" optional:"" name:"build-args" help:"Build arguments passed to docker build."`
-	Profile   string   `short:"p" name:"profile" help:"Profile to activate (overrides defaults.profile)."`
+	Profile   string   `short:"p" name:"profile" completion:"profiles" help:"Profile to activate (overrides defaults.profile)."` //nolint:revive,lll // keep descriptive help text
 	Pull      bool     `name:"pull" help:"Pull the latest base image before building."`
 	DryRun    bool     `short:"n" help:"Dry run. Print commands without executing."`
 }
@@ -41,11 +43,10 @@ func (cmd *BuildCmd) Run(ctx *Context) error {
 
 // RunCmd is the run subcommand.
 type RunCmd struct {
-	Image   string   `arg:"" name:"image" help:"Image to run user-layer on top of" completion:"images"`
-	RunArgs []string `arg:"" optional:"" name:"args" help:"Arguments passed to docker run"`
-	Profile string   `short:"p" name:"profile" help:"Profile to activate (overrides defaults.profile)."`
-	//nolint:revive,lll // keep descriptive help text
-	Features []string `short:"f" name:"feature" help:"Add named feature(s) from config or ./.udocker.yml (run only; build config on the feature is ignored). Repeatable."`
+	Image    string   `arg:"" name:"image" help:"Image to run user-layer on top of" completion:"images"`
+	RunArgs  []string `arg:"" optional:"" name:"args" help:"Arguments passed to docker run"`
+	Profile  string   `short:"p" name:"profile" completion:"profiles" help:"Profile to activate (overrides defaults.profile)."`                                                                  //nolint:revive,lll // keep descriptive help text
+	Features []string `short:"f" name:"feature" completion:"features" help:"Add named feature(s) from config or ./.udocker.yml (run only; build config on the feature is ignored). Repeatable."` //nolint:revive,lll // keep descriptive help text
 	DryRun   bool     `short:"n" help:"Dry run. Print commands without executing."`
 }
 
@@ -105,16 +106,74 @@ func (*listImagesCmd) Run(ctx *Context) error {
 	return nil
 }
 
+// listProfilesCmd is a hidden helper used by shell completion scripts.
+type listProfilesCmd struct{}
+
+func (*listProfilesCmd) Run(_ *Context) error {
+	return listConfigNames(func(c *config.Config) map[string]interface{} {
+		out := make(map[string]interface{})
+		for k := range c.Profiles {
+			out[k] = nil
+		}
+
+		return out
+	})
+}
+
+// listFeaturesCmd is a hidden helper used by shell completion scripts.
+type listFeaturesCmd struct{}
+
+func (*listFeaturesCmd) Run(_ *Context) error {
+	return listConfigNames(func(c *config.Config) map[string]interface{} {
+		out := make(map[string]interface{})
+		for k := range c.Features {
+			out[k] = nil
+		}
+
+		return out
+	})
+}
+
+func listConfigNames(selector func(*config.Config) map[string]interface{}) error {
+	conf, err := config.LoadConfig()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	local, err := config.LoadLocalConfig()
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	if _, err := conf.MergeLocal(local); err != nil {
+		return errors.Wrap(err)
+	}
+
+	names := make([]string, 0, len(selector(conf)))
+	for name := range selector(conf) {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		fmt.Println(name)
+	}
+
+	return nil
+}
+
 // Cli is the root CLI struct.
 type Cli struct {
-	Config     ConfigCmd     `cmd:"" help:"Manage configuration"`
-	Build      BuildCmd      `cmd:"" help:"Build user layer over docker image"`
-	Run        RunCmd        `cmd:"" help:"Run user layer docker image"`
-	Clean      CleanCmd      `cmd:"" help:"Remove all images made by this program"`
-	List       ListCmd       `cmd:"" help:"List all images made by this program"`
-	Completion CompletionCmd `cmd:"" help:"Print shell completion script"`
-	ListImages listImagesCmd `cmd:"" name:"_list-images" hidden:""`
-	Verbose    bool          `help:"Enable debug mode."`
+	Config       ConfigCmd       `cmd:"" help:"Manage configuration"`
+	Build        BuildCmd        `cmd:"" help:"Build user layer over docker image"`
+	Run          RunCmd          `cmd:"" help:"Run user layer docker image"`
+	Clean        CleanCmd        `cmd:"" help:"Remove all images made by this program"`
+	List         ListCmd         `cmd:"" help:"List all images made by this program"`
+	Completion   CompletionCmd   `cmd:"" help:"Print shell completion script"`
+	ListImages   listImagesCmd   `cmd:"" name:"_list-images" hidden:""`
+	ListProfiles listProfilesCmd `cmd:"" name:"_list-profiles" hidden:""`
+	ListFeatures listFeaturesCmd `cmd:"" name:"_list-features" hidden:""`
+	Verbose      bool            `help:"Enable debug mode."`
 }
 
 func main() {

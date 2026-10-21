@@ -14,6 +14,29 @@ _{{.AppName}}() {
             _describe 'command' subcmds
             ;;
         args)
+{{- if or .ProfileFlagPatterns .FeatureFlagPatterns}}
+            local prev="${words[CURRENT-1]}"
+
+            case "${prev}" in
+{{- if .ProfileFlagPatterns}}
+                {{join "|" .ProfileFlagPatterns}})
+                    local -a profiles
+                    profiles=(${(f)"$(${words[1]} _list-profiles 2>/dev/null)"})
+                    _describe 'profile' profiles
+                    return
+                    ;;
+{{- end}}
+{{- if .FeatureFlagPatterns}}
+                {{join "|" .FeatureFlagPatterns}})
+                    local -a features
+                    features=(${(f)"$(${words[1]} _list-features 2>/dev/null)"})
+                    _describe 'feature' features
+                    return
+                    ;;
+{{- end}}
+            esac
+
+{{end -}}
             case ${words[2]} in
 {{- range .Cmds}}
 {{- if isImages .PosCompl}}

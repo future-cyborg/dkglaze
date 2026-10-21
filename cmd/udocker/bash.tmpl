@@ -32,9 +32,23 @@
         return
     fi
 
-{{- if .ValueFlagPatterns}}
+{{- if or .ProfileFlagPatterns .FeatureFlagPatterns .ValueFlagPatterns}}
     case "${prev}" in
+{{- if .ProfileFlagPatterns}}
+        {{join "|" .ProfileFlagPatterns}})
+            COMPREPLY=($(compgen -W "$("${COMP_WORDS[0]}" _list-profiles 2>/dev/null)" -- "${cur}"))
+            return
+            ;;
+{{- end}}
+{{- if .FeatureFlagPatterns}}
+        {{join "|" .FeatureFlagPatterns}})
+            COMPREPLY=($(compgen -W "$("${COMP_WORDS[0]}" _list-features 2>/dev/null)" -- "${cur}"))
+            return
+            ;;
+{{- end}}
+{{- if .ValueFlagPatterns}}
         {{join "|" .ValueFlagPatterns}}) return;;
+{{- end}}
     esac
 
 {{end -}}
