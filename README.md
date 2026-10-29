@@ -223,12 +223,30 @@ When a profile is activated, its features are merged in list order. For each fea
 
 The result is a flat build+run configuration used for that invocation.
 
+A profile can also `extends` another profile instead of (or in addition to) listing every feature itself:
+
+```yaml
+profiles:
+  default:
+    features: [base]
+  gpu-dev:
+    features: [base, gpu]
+  agent-a:
+    extends: gpu-dev    # resolves to [base, gpu], in order
+    features: [repos-team-a]
+```
+
+`agent-a` resolves to `[base, gpu, repos-team-a]` — the extended profile's features first, then this profile's own features appended after. `extends` chains (a profile extending a profile that itself extends another) are followed to their root; a cycle (including a profile extending itself) is a hard error. This is especially useful from the [project-local config](#project-local-configuration): a local profile can `extends` a global one and just add what's local-specific, without having to know or copy the global profile's full feature list.
+
 ### Project-local configuration
 
 For a per-project or per-workspace set of features and profiles — e.g. a tree of cloned repos where you want to mount only a task-relevant subset into the container — `udocker` also looks for a `.udocker.yml` file in the **current directory** (the directory you run `udocker` from, not a parent or git root). It is entirely optional and additive to the global config.
 
 ```yaml
 # ./.udocker.yml
+defaults:
+  profile: agent-a  # overrides the global config's defaults.profile when -p is not given
+
 features:
   repos-team-a:
     run:
@@ -243,14 +261,16 @@ features:
 
 profiles:
   agent-a:
+    extends: gpu-dev    # a profile from the global config — inherits its full feature list
     features:
-      - base          # a feature from the global config
-      - opencode      # a feature from the global config
-      - repos-team-a  # a feature defined locally, above
+      - repos-team-a    # a feature defined locally, above
 ```
 
 ```sh
 cd ~/projects   # workspace root containing team-a/, team-b/, team-c/...
+
+# no -p needed — ./.udocker.yml's defaults.profile selects agent-a
+udocker run myimage
 
 # a named, reusable local profile — tab-completable, mixes global + local features
 udocker run -p agent-a myimage
@@ -265,8 +285,10 @@ A few rules keep this predictable and safe:
 - **Local features cannot define `build:`** — only `run.args`/`run.mounts`. A `build:` key under a local feature is a parse error. This keeps the project-local file (which may be committed and shared/cloned) unable to change what gets built or run arbitrary commands at build time; it can only add run-time arguments and mounts.
 - **Names must not collide** with the global config. If a local feature or profile shares a name with a global one, `udocker` errors rather than silently shadowing it.
 - **Local profiles can mix local and global features** (as in the `agent-a` example above) and work for both `udocker build -p <name>` and `udocker run -p <name>`, exactly like global profiles.
+- **A local (or global) profile can `extends` another profile** — see [Profile resolution](#profile-resolution) — so a local profile only needs to list what it adds on top of an existing (typically global) profile, instead of duplicating its whole feature list.
+- **`defaults.profile` in `./.udocker.yml` overrides the global config's `defaults.profile`** when `-p` is not given, letting a project pick its own default profile without touching the global config. Precedence is: `-p` flag > local `defaults.profile` > global `defaults.profile`. It must name a profile that exists (local or global) once merged, or `udocker` errors.
 - **`-f/--feature <name>` is `run`-only** and applies only a feature's `run.args`/`run.mounts` — its `build.*` is ignored (with a warning if present), since the image tag is derived from the *profile* name, not from `-f` selections. This means one built image is reused no matter which `-f` combination you pass at runtime.
-- **Local-sourced selections are never silent.** Whenever `run` resolves a profile or feature that came from `./.udocker.yml`, it prints a warning naming the profile/feature and the local file path, so you always know when a run depends on something outside the global config. `-n`/dry-run still prints the exact resulting command either way.
+- **Local-sourced selections are never silent.** Whenever `run` resolves a profile or feature that came from `./.udocker.yml` — including a profile picked only because of local `defaults.profile`, or a profile reached via an `extends` chain — it prints a warning naming it and the local file path, so you always know when a run depends on something outside the global config. `-n`/dry-run still prints the exact resulting command either way.
 - Both local and global feature/profile names are tab-completable (see [Shell Completion](#shell-completion)).
 
 ### Dockerfile templates

@@ -1242,6 +1242,37 @@ profiles:
 	}
 }
 
+func TestLoadLocalConfig_ParsesDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yml")
+
+	validYAML := `defaults:
+  profile: agent-a
+profiles:
+  agent-a:
+    extends: default
+    features: [repos-team-a]
+`
+	if err := os.WriteFile(configPath, []byte(validYAML), 0o600); err != nil {
+		t.Fatalf("failed to write YAML: %v", err)
+	}
+
+	t.Setenv("UDOCKER_LOCAL_CONFIG", configPath)
+
+	local, err := config.LoadLocalConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if local.Defaults.Profile != "agent-a" {
+		t.Errorf("expected defaults.profile %q, got %q", "agent-a", local.Defaults.Profile)
+	}
+
+	if local.Profiles["agent-a"].Extends != "default" {
+		t.Errorf("expected agent-a to extend %q, got %q", "default", local.Profiles["agent-a"].Extends)
+	}
+}
+
 func TestMergeLocal_AddsNewFeaturesAndProfiles(t *testing.T) {
 	conf := &config.Config{
 		Features: map[string]config.Feature{
@@ -1701,4 +1732,200 @@ func TestResolveFeatureRunOnly_IgnoresBuildContent(t *testing.T) {
 
 	// Build content should never appear in the returned values
 	// (structurally confirmed by the return signature not including Build)
+}
+
+func TestProfileChain_ExtendsAppendsOwnFeaturesAfterBase(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"base":  {Run: config.Run{Args: []string{"-it"}}},
+			"extra": {Run: config.Run{Args: []string{"--extra"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+			"agent-a": {Extends: "default", Features: []string{"extra"}},
+		},
+	}
+
+	names, err := conf.ResolveFeatureNames("agent-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(names) != 2 || names[0] != "base" || names[1] != "extra" {
+		t.Errorf("expected [base extra], got %v", names)
+	}
+}
+
+func TestResolveProfile_ExtendsMergesBaseThenOwnFeatures(t *testing.T) {
+	conf := &config.Config{
+		Defaults: config.Defaults{Suffix: "test"},
+		Features: map[string]config.Feature{
+			"base":  {Run: config.Run{Args: []string{"-it"}}},
+			"extra": {Run: config.Run{Args: []string{"--extra"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+			"agent-a": {Extends: "default", Features: []string{"extra"}},
+		},
+	}
+
+	resolved, err := conf.ResolveProfile(context.Background(), "agent-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(resolved.Run.Args) != 2 || resolved.Run.Args[0] != "-it" || resolved.Run.Args[1] != "--extra" {
+		t.Errorf("expected run args [-it --extra], got %v", resolved.Run.Args)
+	}
+}
+
+func TestProfileChain_UnknownExtendsTargetReturnsError(t *testing.T) {
+	conf := &config.Config{
+		Profiles: map[string]config.Profile{
+			"agent-a": {Extends: "nonexistent", Features: []string{"base"}},
+		},
+	}
+
+	_, err := conf.ResolveFeatureNames("agent-a")
+	if err == nil {
+		t.Fatal("expected error for unknown extends target, got nil")
+	}
+}
+
+func TestProfileChain_CycleReturnsError(t *testing.T) {
+	conf := &config.Config{
+		Profiles: map[string]config.Profile{
+			"a": {Extends: "b"},
+			"b": {Extends: "a"},
+		},
+	}
+
+	_, err := conf.ResolveFeatureNames("a")
+	if err == nil {
+		t.Fatal("expected error for extends cycle, got nil")
+	}
+}
+
+func TestProfileChain_SelfExtendsReturnsError(t *testing.T) {
+	conf := &config.Config{
+		Profiles: map[string]config.Profile{
+			"a": {Extends: "a"},
+		},
+	}
+
+	_, err := conf.ResolveFeatureNames("a")
+	if err == nil {
+		t.Fatal("expected error for self-extending profile, got nil")
+	}
+}
+
+func TestMergeLocal_LocalDefaultProfileOverridesGlobalDefault(t *testing.T) {
+	conf := &config.Config{
+		Defaults: config.Defaults{Profile: "default"},
+		Features: map[string]config.Feature{
+			"base": {Run: config.Run{Args: []string{"--rm"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	local := &config.LocalConfig{
+		Defaults: config.LocalDefaults{Profile: "local-profile"},
+		Profiles: map[string]config.Profile{
+			"local-profile": {Features: []string{"base"}},
+		},
+	}
+
+	prov, err := conf.MergeLocal(local)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if conf.Defaults.Profile != "local-profile" {
+		t.Errorf("expected conf.Defaults.Profile to be overridden to %q, got %q", "local-profile", conf.Defaults.Profile)
+	}
+
+	if !prov.DefaultFromLocal {
+		t.Error("expected prov.DefaultFromLocal to be true")
+	}
+}
+
+func TestMergeLocal_LocalDefaultProfileCanReferenceGlobalProfile(t *testing.T) {
+	conf := &config.Config{
+		Defaults: config.Defaults{Profile: "default"},
+		Features: map[string]config.Feature{
+			"base": {Run: config.Run{Args: []string{"--rm"}}},
+			"gpu":  {Run: config.Run{Args: []string{"--gpus", "all"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+			"gpu-dev": {Features: []string{"base", "gpu"}},
+		},
+	}
+
+	local := &config.LocalConfig{
+		Defaults: config.LocalDefaults{Profile: "gpu-dev"},
+	}
+
+	prov, err := conf.MergeLocal(local)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if conf.Defaults.Profile != "gpu-dev" {
+		t.Errorf("expected conf.Defaults.Profile to be %q, got %q", "gpu-dev", conf.Defaults.Profile)
+	}
+
+	if !prov.DefaultFromLocal {
+		t.Error("expected prov.DefaultFromLocal to be true")
+	}
+}
+
+func TestMergeLocal_UnknownLocalDefaultProfileReturnsError(t *testing.T) {
+	conf := &config.Config{
+		Defaults: config.Defaults{Profile: "default"},
+		Features: map[string]config.Feature{
+			"base": {Run: config.Run{Args: []string{"--rm"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	local := &config.LocalConfig{
+		Defaults: config.LocalDefaults{Profile: "nonexistent"},
+	}
+
+	_, err := conf.MergeLocal(local)
+	if err == nil {
+		t.Fatal("expected error for unknown local defaults.profile, got nil")
+	}
+}
+
+func TestMergeLocal_NoLocalDefaultLeavesGlobalDefaultUnchanged(t *testing.T) {
+	conf := &config.Config{
+		Defaults: config.Defaults{Profile: "default"},
+		Features: map[string]config.Feature{
+			"base": {Run: config.Run{Args: []string{"--rm"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	local := &config.LocalConfig{}
+
+	prov, err := conf.MergeLocal(local)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if conf.Defaults.Profile != "default" {
+		t.Errorf("expected conf.Defaults.Profile to remain %q, got %q", "default", conf.Defaults.Profile)
+	}
+
+	if prov.DefaultFromLocal {
+		t.Error("expected prov.DefaultFromLocal to be false")
+	}
 }

@@ -33,6 +33,7 @@ var (
 	errUnknownProfile    = goerrors.New("unknown profile")
 	errUnknownFeature    = goerrors.New("unknown feature")
 	errDefaultProfile    = goerrors.New("defaults.profile references unknown profile")
+	errProfileCycle      = goerrors.New("profile extends cycle detected")
 
 	// ErrLocalNameCollision is returned when a local config name collides with a global one.
 	ErrLocalNameCollision = goerrors.New("name already defined in global config")
@@ -57,8 +58,11 @@ type Feature struct {
 	Run   Run   `yaml:"run"`
 }
 
-// Profile represents a named combination of features.
+// Profile represents a named combination of features. If Extends names
+// another profile, that profile's resolved feature list is prepended before
+// this profile's own Features, so a profile only needs to list what it adds.
 type Profile struct {
+	Extends  string   `yaml:"extends,omitempty"`
 	Features []string `yaml:"features"`
 }
 
@@ -73,15 +77,26 @@ type LocalFeature struct {
 // It is parsed independently of the global Config — not validated against
 // schema.json and not merged via conflate.
 type LocalConfig struct {
+	Defaults LocalDefaults           `yaml:"defaults"`
 	Features map[string]LocalFeature `yaml:"features"`
 	Profiles map[string]Profile      `yaml:"profiles"`
 }
 
+// LocalDefaults represents default-selection configuration that may be set in
+// the project-local config file. Unlike the global Defaults, there is no
+// Suffix override — only which profile to activate when -p is not given.
+type LocalDefaults struct {
+	Profile string `yaml:"profile"`
+}
+
 // LocalProvenance records which feature/profile names in a merged Config
-// originated from the local project-tree config file.
+// originated from the local project-tree config file, plus whether the
+// active default profile was selected via the local config's
+// defaults.profile rather than the global config's.
 type LocalProvenance struct {
-	Features map[string]bool
-	Profiles map[string]bool
+	Features         map[string]bool
+	Profiles         map[string]bool
+	DefaultFromLocal bool
 }
 
 // Build represents build configuration.
@@ -297,6 +312,15 @@ func (conf *Config) MergeLocal(local *LocalConfig) (*LocalProvenance, error) {
 		prov.Profiles[name] = true
 	}
 
+	if local.Defaults.Profile != "" {
+		if _, ok := conf.Profiles[local.Defaults.Profile]; !ok {
+			return nil, errors.Wrap(fmt.Errorf("%w: %q", errDefaultProfile, local.Defaults.Profile))
+		}
+
+		conf.Defaults.Profile = local.Defaults.Profile
+		prov.DefaultFromLocal = true
+	}
+
 	return prov, nil
 }
 
@@ -361,15 +385,64 @@ func (conf *Config) ResolveFeatureRunOnly(ctx context.Context, name string) (arg
 	return expandedArgs, expandedMounts, hasBuild, nil
 }
 
+// ProfileChain returns the ordered list of profile names starting with name
+// and following each ancestor's Extends field, ending at the root profile
+// that does not extend anything (chain[0] is name itself). Returns
+// errUnknownProfile if name or any ancestor is not defined, and
+// errProfileCycle if the chain revisits a name.
+func (conf *Config) ProfileChain(name string) ([]string, error) {
+	var chain []string
+
+	visited := map[string]bool{}
+
+	for current := name; current != ""; {
+		if visited[current] {
+			return nil, errors.Wrap(fmt.Errorf("%w: %s", errProfileCycle, current))
+		}
+
+		visited[current] = true
+
+		profile, ok := conf.Profiles[current]
+		if !ok {
+			return nil, errors.Wrap(fmt.Errorf("%w: %s", errUnknownProfile, current))
+		}
+
+		chain = append(chain, current)
+		current = profile.Extends
+	}
+
+	return chain, nil
+}
+
+// ResolveFeatureNames returns the ordered, flattened list of feature names for
+// the named profile, expanding any Extends chain: the most distant ancestor's
+// own Features come first, followed by each descendant's own Features in
+// turn, ending with the named profile's own Features last. This lets a
+// profile "extend" another and only list what it adds.
+func (conf *Config) ResolveFeatureNames(name string) ([]string, error) {
+	chain, err := conf.ProfileChain(name)
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+
+	for i := len(chain) - 1; i >= 0; i-- {
+		names = append(names, conf.Profiles[chain[i]].Features...)
+	}
+
+	return names, nil
+}
+
 func (conf *Config) mergeProfile(ctx context.Context, name string) (*ResolvedConfig, error) {
-	profile, ok := conf.Profiles[name]
-	if !ok {
-		return nil, errors.Wrap(fmt.Errorf("%w: %s", errUnknownProfile, name))
+	featureNames, err := conf.ResolveFeatureNames(name)
+	if err != nil {
+		return nil, err
 	}
 
 	resolved := &ResolvedConfig{Suffix: conf.Defaults.Suffix + "-" + name}
 
-	for _, featureName := range profile.Features {
+	for _, featureName := range featureNames {
 		feature, ok := conf.Features[featureName]
 		if !ok {
 			return nil, errors.Wrap(fmt.Errorf("%w: %s", errUnknownFeature, featureName))

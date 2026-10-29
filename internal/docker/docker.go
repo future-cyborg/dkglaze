@@ -205,7 +205,7 @@ func Run(ctx context.Context, image string, runArgs []string, profile string, fe
 		activeProfile = profile
 	}
 
-	warnLocalProvenance(conf, prov, activeProfile)
+	warnLocalProvenance(conf, prov, activeProfile, profile != "")
 
 	resolved, err := conf.ResolveProfileNoArgs(ctx, activeProfile)
 	if err != nil {
@@ -531,24 +531,36 @@ func newImageName(image, imageTemplate string) string {
 }
 
 // warnLocalProvenance prints a loud, non-blocking warning whenever the
-// resolved profile or any of its features originated from the local
-// project-tree config file, so a run never silently depends on
-// local-sourced configuration.
-func warnLocalProvenance(conf *config.Config, prov *config.LocalProvenance, profileName string) {
+// resolved profile, any profile it extends, any of their features, or the
+// default-profile selection itself originated from the local project-tree
+// config file, so a run never silently depends on local-sourced
+// configuration. explicitProfile is true when the caller passed -p, in which
+// case the local defaults.profile (if any) played no part in the selection.
+//
+//nolint:revive // flag-parameter is the clearest API here
+func warnLocalProvenance(conf *config.Config, prov *config.LocalProvenance, profileName string, explicitProfile bool) {
 	path, _, err := config.GetLocalConfigPath()
 	if err != nil {
 		path = localConfigFallbackLabel
 	}
-	if prov.Profiles[profileName] {
-		logger.PrintColorF(logger.Yellow, "using profile %q from local config %s", profileName, path)
+
+	if !explicitProfile && prov.DefaultFromLocal {
+		logger.PrintColorF(logger.Yellow, "profile %q selected by defaults.profile in local config %s", profileName, path)
 	}
-	p, ok := conf.Profiles[profileName]
-	if !ok {
-		return
+
+	if chain, err := conf.ProfileChain(profileName); err == nil {
+		for _, name := range chain {
+			if prov.Profiles[name] {
+				logger.PrintColorF(logger.Yellow, "using profile %q from local config %s", name, path)
+			}
+		}
 	}
-	for _, featureName := range p.Features {
-		if prov.Features[featureName] {
-			logger.PrintColorF(logger.Yellow, "feature %q from local config %s", featureName, path)
+
+	if featureNames, err := conf.ResolveFeatureNames(profileName); err == nil {
+		for _, featureName := range featureNames {
+			if prov.Features[featureName] {
+				logger.PrintColorF(logger.Yellow, "feature %q from local config %s", featureName, path)
+			}
 		}
 	}
 }

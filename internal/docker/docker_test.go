@@ -387,7 +387,7 @@ func TestWarnLocalProvenance_NoWarningWhenGlobal(t *testing.T) {
 	}
 
 	// This should not panic and should not produce warnings
-	docker.ExportedWarnLocalProvenance(conf, prov, "default")
+	docker.ExportedWarnLocalProvenance(conf, prov, "default", true)
 }
 
 func TestWarnLocalProvenance_WarnsWhenProfileFromLocal(t *testing.T) {
@@ -407,7 +407,7 @@ func TestWarnLocalProvenance_WarnsWhenProfileFromLocal(t *testing.T) {
 	}
 
 	// This should not panic
-	docker.ExportedWarnLocalProvenance(conf, prov, "local-profile")
+	docker.ExportedWarnLocalProvenance(conf, prov, "local-profile", true)
 }
 
 func TestWarnLocalProvenance_WarnsWhenFeatureFromLocal(t *testing.T) {
@@ -428,7 +428,7 @@ func TestWarnLocalProvenance_WarnsWhenFeatureFromLocal(t *testing.T) {
 	}
 
 	// This should not panic
-	docker.ExportedWarnLocalProvenance(conf, prov, "default")
+	docker.ExportedWarnLocalProvenance(conf, prov, "default", true)
 }
 
 func TestWarnLocalProvenance_IgnoresUnknownProfile(t *testing.T) {
@@ -448,5 +448,48 @@ func TestWarnLocalProvenance_IgnoresUnknownProfile(t *testing.T) {
 	}
 
 	// This should not panic even though "nonexistent" is not in conf
-	docker.ExportedWarnLocalProvenance(conf, prov, "nonexistent")
+	docker.ExportedWarnLocalProvenance(conf, prov, "nonexistent", true)
+}
+
+func TestWarnLocalProvenance_WarnsWhenDefaultFromLocalAndProfileNotExplicit(t *testing.T) {
+	conf := &config.Config{
+		Defaults: config.Defaults{Profile: "default"},
+		Features: map[string]config.Feature{
+			"base": {Run: config.Run{Args: []string{"--rm"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	prov := &config.LocalProvenance{
+		Features:         map[string]bool{},
+		Profiles:         map[string]bool{},
+		DefaultFromLocal: true,
+	}
+
+	// This should not panic; the default-selection warning fires since the
+	// profile wasn't explicitly passed via -p.
+	docker.ExportedWarnLocalProvenance(conf, prov, "default", false)
+}
+
+func TestWarnLocalProvenance_NoDefaultWarningWhenProfileExplicit(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"base": {Run: config.Run{Args: []string{"--rm"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+
+	prov := &config.LocalProvenance{
+		Features:         map[string]bool{},
+		Profiles:         map[string]bool{},
+		DefaultFromLocal: true,
+	}
+
+	// This should not panic; the default-selection warning does not apply
+	// since the profile was explicitly passed via -p.
+	docker.ExportedWarnLocalProvenance(conf, prov, "default", true)
 }

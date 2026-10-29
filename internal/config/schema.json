@@ -120,6 +120,10 @@
                 "type": "object",
                 "properties":
                 {
+                    "extends":
+                    {
+                        "type": "string"
+                    },
                     "features":
                     {
                         "type": "array",
@@ -129,7 +133,6 @@
                         }
                     }
                 },
-                "required": ["features"],
                 "additionalProperties": false
             }
         }
