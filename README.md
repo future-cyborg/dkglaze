@@ -1,16 +1,34 @@
 # ldocker
 
+[![Go Version](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 `ldocker` builds and runs personalized Docker images by layering user-specific customizations on top of an existing base image. You define **features** (named bundles of Dockerfile templates, build arguments, and run configuration) and **profiles** (ordered combinations of features) in a config file, and `ldocker` handles chaining the builds, tagging the result, and running the final image.
 
 A typical use case: take a standard image like `ubuntu:22.04` and automatically layer your dotfiles, user account, tools, or SSH keys on top of it — reproducibly. Switch between a minimal `default` profile and a `gpu-dev` profile with a single flag.
 
 ## Installation
 
-Requires `make` and `docker`.
+### Prerequisites
+
+To build, lint, and test ldocker:
+
+- `make`
+- Docker with BuildKit. The Makefile sets `DOCKER_BUILDKIT=1` and runs every build, lint, and test step through `docker build` against the Dockerfile. No Go toolchain is needed on the host for these targets.
+
+To run ldocker:
+
+- A `docker` CLI on `PATH` and a reachable Docker daemon (`DOCKER_HOST` is honored). `ldocker build`/`run` shell out to `docker build`, `docker run`, and `docker exec`.
+- `bash` and `sh` on the host. Shell-expanded config values run through `bash -c`, and dynamic `cmd:` values run through `sh -c`.
+- A global config file at `~/.config/ldocker/config.yml` (create it with `ldocker config init`).
+
+### Install
 
 ```sh
-make install   # builds the binary and copies it to ~/.local/bin/ldocker
+make install   # runs `make build`, then copies bin/<os>/<arch>/ldocker to ~/.local/bin/ldocker
 ```
+
+`~/.local/bin` must already exist and be on your `PATH`.
 
 ## Usage
 
@@ -129,14 +147,14 @@ ldocker build ubuntu:22.04 -- --no-cache --build-arg FOO=bar
 `ldocker run <image>` resolves the active profile, merges its features, then runs:
 
 ```
-docker run [merged run.args] [--volume <mount>...] [CLI args] <image>-<suffix>:<tag>
+docker run [merged run.args] [--volume <mount>...] [CLI args] <base>-<suffix>:<tag>
 ```
 
 Mounts from `run.mounts` are expanded (`~` and `$VAR`) and passed as `--volume` flags before any CLI args. This lets you set persistent volume mounts in config while still passing one-off flags at runtime:
 
 ```sh
 ldocker run ubuntu:22.04 -- -e DEBUG=1
-# executes: docker run -it --rm --volume /home/alice/.config/opencode:/root/.config/opencode -e DEBUG=1 ubuntu-ldocker:22.04
+# executes: docker run -it --rm --volume /home/alice/.config/opencode:/root/.config/opencode -e DEBUG=1 ubuntu-ldocker-default:22.04
 ```
 
 ## Configuration
@@ -276,14 +294,14 @@ ldocker run myimage
 ldocker run -p agent-a myimage
 
 # or compose ad hoc, on top of a plain global profile
-ldocker run -p default-no-mount myimage -f repos-team-a -f repos-team-c
+ldocker run -p default myimage -f repos-team-a -f repos-team-c
 ```
 
 A few rules keep this predictable and safe:
 
 - **Discovery is current-directory only** — no walking up to a parent or git root. Set `LDOCKER_LOCAL_CONFIG=/path/to/file.yml` to point at a different file explicitly; if that variable is set and the file is missing, `ldocker` errors (whereas a missing default `./.ldocker.yml` is simply ignored).
-- **Local features cannot define `build:`** — only `run.args`/`run.mounts`. A `build:` key under a local feature is a parse error. This keeps the project-local file (which may be committed and shared/cloned) unable to change what gets built or run arbitrary commands at build time; it can only add run-time arguments and mounts.
-- **Local `run.args`/`run.mounts` are shell-expanded, but blocked by default** — like global config, these values are evaluated through `bash`, so `$(...)`, backticks, and similar constructs run arbitrary commands. Because a shared `.ldocker.yml` is untrusted input, `ldocker build`/`ldocker run` refuse to expand a local feature's non-empty `run.args`/`run.mounts` and error (naming the feature and file) unless you pass `--trust` on that invocation. There is deliberately no short flag or environment variable/config setting for this, so the opt-in requires typing it out and applies to one command at a time. Only pass the flag for a `.ldocker.yml` you trust. Global config (`~/.config/ldocker/config.yml`) is always trusted and is unaffected.
+- **Local features cannot define `build:`** — only `run.args`/`run.mounts`. A `build:` key under a local feature is a parse error, so a shared, cloned `.ldocker.yml` cannot change what gets built.
+- **Local `run.args`/`run.mounts` are not shell-expanded by default** — `ldocker build`/`ldocker run` refuse to expand them and error (naming the feature and file) unless you pass `--trust` on that invocation. See [Security model](#security-model).
 - **Names must not collide** with the global config. If a local feature or profile shares a name with a global one, `ldocker` errors rather than silently shadowing it.
 - **Local profiles can mix local and global features** (as in the `agent-a` example above) and work for both `ldocker build -p <name>` and `ldocker run -p <name>`, exactly like global profiles.
 - **A local (or global) profile can `extends` another profile** — see [Profile resolution](#profile-resolution) — so a local profile only needs to list what it adds on top of an existing (typically global) profile, instead of duplicating its whole feature list.
@@ -291,6 +309,18 @@ A few rules keep this predictable and safe:
 - **`-f/--feature <name>` is `run`-only** and applies only a feature's `run.args`/`run.mounts` — its `build.*` is ignored (with a warning if present), since the image tag is derived from the *profile* name, not from `-f` selections. This means one built image is reused no matter which `-f` combination you pass at runtime.
 - **Local-sourced selections are never silent.** Whenever `run` resolves a profile or feature that came from `./.ldocker.yml` — including a profile picked only because of local `defaults.profile`, or a profile reached via an `extends` chain — it prints a warning naming it and the local file path, so you always know when a run depends on something outside the global config. `-n`/dry-run still prints the exact resulting command either way.
 - Both local and global feature/profile names are tab-completable (see [Shell Completion](#shell-completion)).
+
+### Security model
+
+ldocker treats its two config sources differently:
+
+- **Global config (`~/.config/ldocker/config.yml`) is fully trusted.** It is your own file. Its `run.args` and `run.mounts` values are shell-expanded through `bash -c`, so command substitution such as `$(...)` runs as written. Dynamic `build.args` `cmd:` entries run through `sh -c`. This is intentional.
+- **Project-local config (`./.ldocker.yml`) is treated as untrusted input**, since it may come from a repository you cloned:
+  - Local features cannot define `build:` at all. There is no field for it.
+  - Local features' `run.args` and `run.mounts` are **not** shell-expanded by default. If a `build` or `run` resolves a local feature with non-empty `run.args` or `run.mounts` (including via `-f`), ldocker stops with an error naming the feature and the file.
+  - To proceed, pass `--trust` on that one invocation, for example `ldocker run --trust -p agent-a myimage`. This is the only way local `run.args`/`run.mounts` get shell-expanded.
+  - There is deliberately no short flag and no environment variable or config setting for this. The opt-in is typed out each time and applies to that command only.
+- **Only pass `--trust` for a `.ldocker.yml` you actually trust.** Read the file first: with `--trust`, any `$(...)` or backtick expression in it runs with your privileges.
 
 ### Dockerfile templates
 
@@ -313,7 +343,7 @@ Every image built by `ldocker` is labeled `com.ldocker=true`, which is how `ldoc
 
 ## Development
 
-All build, lint, and test targets run inside Docker via BuildKit. Only `make` and `docker` are required on the host.
+All build, lint, and test targets run inside Docker via BuildKit. Only `make` and `docker` are required on the host for these targets. The exception is `unit-test-cover`, which runs `go tool cover` on the host and so needs a Go toolchain.
 
 ```
 make bin                              all bin/ targets
@@ -345,27 +375,6 @@ make tag/bump-minor-and-push          tag minor version and push
 make tag/bump-patch-and-push          tag patch version and push
 ```
 
-## Private modules
+## License
 
-If this repo imports private Go modules, configure `GOPRIVATE` and `.netrc` in the `Dockerfile`:
-
-1. Set `GOPRIVATE` in the `base` stage:
-
-```dockerfile
-ENV GOPRIVATE=
-```
-
-2. Uncomment the `.netrc` block in the `base` stage and supply credentials:
-
-```dockerfile
-ARG VCS_LOGIN
-ARG VCS_TOKEN
-RUN echo "machine github.com login ${VCS_LOGIN} password ${VCS_TOKEN}" > ~/.netrc
-```
-
-3. Add the corresponding `--build-arg` entries to `BUILD_ARGS` in the `Makefile`:
-
-```makefile
-BUILD_ARGS         += --build-arg VCS_LOGIN=$(VCS_LOGIN)
-BUILD_ARGS         += --build-arg VCS_TOKEN=$(VCS_TOKEN)
-```
+ldocker is released under the [MIT License](LICENSE).
