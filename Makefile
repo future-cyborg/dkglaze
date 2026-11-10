@@ -349,6 +349,6 @@ tag/bump-patch-and-push: .enforce-default-branch .enforce-updated-branch
 build: bin/$(LOCAL_PLATFORM)/ldocker
 
 .PHONY: install
-install:
+install: build
 	cp $(MAKEFILE_DIR)bin/$(LOCAL_PLATFORM)/ldocker $(HOME)/.local/bin/ldocker
 
