@@ -2,3 +2,9 @@
 /report/
 /docs/
 /ROADMAP.md
+/dist/
+/ldocker
+coverage.out
+*.cover.out
+.idea/
+.vscode/
