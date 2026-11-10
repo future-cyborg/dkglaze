@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/future-cyborg/udocker/internal/logger"
+	"github.com/future-cyborg/ldocker/internal/logger"
 )
 
 func TestColorize(t *testing.T) {

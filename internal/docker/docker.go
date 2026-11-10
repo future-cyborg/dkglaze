@@ -18,9 +18,9 @@ import (
 	imageapi "github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 
-	"github.com/future-cyborg/udocker/internal/config"
-	"github.com/future-cyborg/udocker/internal/errors"
-	"github.com/future-cyborg/udocker/internal/logger"
+	"github.com/future-cyborg/ldocker/internal/config"
+	"github.com/future-cyborg/ldocker/internal/errors"
+	"github.com/future-cyborg/ldocker/internal/logger"
 )
 
 const (
@@ -289,7 +289,7 @@ func pullImage(ctx context.Context, image string) error {
 //nolint:revive // flag-parameter is the clearest API here
 func Clean(ctx context.Context, dryRun bool) error {
 	return withDockerClient(func(cli *client.Client) error {
-		imageItems, err := listUdockerImages(ctx, cli)
+		imageItems, err := listLdockerImages(ctx, cli)
 		if err != nil {
 			return err
 		}
@@ -317,8 +317,8 @@ func Clean(ctx context.Context, dryRun bool) error {
 	})
 }
 
-func listUdockerImages(ctx context.Context, cli *client.Client) ([]imageapi.Summary, error) {
-	f := client.Filters{"label": {"com.udocker": true}}
+func listLdockerImages(ctx context.Context, cli *client.Client) ([]imageapi.Summary, error) {
+	f := client.Filters{"label": {"com.ldocker": true}}
 	imageList, err := cli.ImageList(ctx, client.ImageListOptions{Filters: f})
 	if err != nil {
 		return nil, errors.Wrap(err)
@@ -327,8 +327,8 @@ func listUdockerImages(ctx context.Context, cli *client.Client) ([]imageapi.Summ
 	return imageList.Items, nil
 }
 
-// ListNonUdockerImages returns tags of all local Docker images not managed by udocker.
-func ListNonUdockerImages(ctx context.Context) ([]string, error) {
+// ListNonLdockerImages returns tags of all local Docker images not managed by ldocker.
+func ListNonLdockerImages(ctx context.Context) ([]string, error) {
 	var tags []string
 
 	err := withDockerClient(func(cli *client.Client) error {
@@ -340,7 +340,7 @@ func ListNonUdockerImages(ctx context.Context) ([]string, error) {
 		for i := range imageList.Items {
 			img := &imageList.Items[i]
 
-			if img.Labels["com.udocker"] != "" {
+			if img.Labels["com.ldocker"] != "" {
 				continue
 			}
 
@@ -359,10 +359,10 @@ func ListNonUdockerImages(ctx context.Context) ([]string, error) {
 	return tags, err
 }
 
-// List prints all images managed by udocker.
+// List prints all images managed by ldocker.
 func List(ctx context.Context) error {
 	return withDockerClient(func(cli *client.Client) error {
-		images, err := listUdockerImages(ctx, cli)
+		images, err := listLdockerImages(ctx, cli)
 		if err != nil {
 			return err
 		}
@@ -404,7 +404,7 @@ func buildTemplate(ctx context.Context, t *templateBuild) error {
 
 	command := []string{
 		dockerCmd, "build",
-		"--label", "com.udocker=true",
+		"--label", "com.ldocker=true",
 		"-t", t.resultTag,
 		"-f", placeholderOrReal,
 	}

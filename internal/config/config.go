@@ -16,8 +16,8 @@ import (
 	"github.com/the4thamigo-uk/conflate"
 	"gopkg.in/yaml.v3"
 
-	"github.com/future-cyborg/udocker/internal/errors"
-	"github.com/future-cyborg/udocker/internal/logger"
+	"github.com/future-cyborg/ldocker/internal/errors"
+	"github.com/future-cyborg/ldocker/internal/logger"
 )
 
 //go:embed schema.json
@@ -73,7 +73,7 @@ type LocalFeature struct {
 	Run Run `yaml:"run"`
 }
 
-// LocalConfig represents the project-local config file ($PWD/.udocker.yml).
+// LocalConfig represents the project-local config file ($PWD/.ldocker.yml).
 // It is parsed independently of the global Config — not validated against
 // schema.json and not merged via conflate.
 type LocalConfig struct {
@@ -221,14 +221,14 @@ func loadAndValidate(configFile string) (*conflate.Conflate, error) {
 
 // GetConfigPaths returns the config files and directories.
 func GetConfigPaths() (Paths, error) {
-	configDir := os.Getenv("UDOCKER_CONFIG_DIR")
+	configDir := os.Getenv("LDOCKER_CONFIG_DIR")
 	if configDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return Paths{}, errors.Wrap(err)
 		}
 
-		configDir = filepath.Join(home, ".config", "udocker")
+		configDir = filepath.Join(home, ".config", "ldocker")
 	}
 
 	return Paths{
@@ -239,12 +239,12 @@ func GetConfigPaths() (Paths, error) {
 }
 
 // GetLocalConfigPath returns the path to the project-local config file and whether
-// the path was explicitly set via the UDOCKER_LOCAL_CONFIG environment variable.
+// the path was explicitly set via the LDOCKER_LOCAL_CONFIG environment variable.
 // If the env var is set, the path is explicit and a missing file is an error.
-// If the env var is not set, the path defaults to $PWD/.udocker.yml and a missing
+// If the env var is not set, the path defaults to $PWD/.ldocker.yml and a missing
 // file is a silent no-op (not an error).
 func GetLocalConfigPath() (path string, explicit bool, err error) {
-	envPath := os.Getenv("UDOCKER_LOCAL_CONFIG")
+	envPath := os.Getenv("LDOCKER_LOCAL_CONFIG")
 	if envPath != "" {
 		return envPath, true, nil
 	}
@@ -254,7 +254,7 @@ func GetLocalConfigPath() (path string, explicit bool, err error) {
 		return "", false, errors.Wrap(err)
 	}
 
-	return filepath.Join(cwd, ".udocker.yml"), false, nil
+	return filepath.Join(cwd, ".ldocker.yml"), false, nil
 }
 
 // LoadLocalConfig loads the project-local config file. It is parsed independently
@@ -269,7 +269,7 @@ func LoadLocalConfig() (*LocalConfig, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is from env var or cwd, user-controlled
 	if err != nil {
 		if goerrors.Is(err, os.ErrNotExist) && !explicit {
-			// Default path (.udocker.yml in cwd) not found is not an error.
+			// Default path (.ldocker.yml in cwd) not found is not an error.
 			return &LocalConfig{}, nil
 		}
 

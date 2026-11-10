@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/future-cyborg/udocker/internal/config"
-	"github.com/future-cyborg/udocker/internal/docker"
+	"github.com/future-cyborg/ldocker/internal/config"
+	"github.com/future-cyborg/ldocker/internal/docker"
 )
 
 func TestNewImageName(t *testing.T) {
@@ -20,56 +20,56 @@ func TestNewImageName(t *testing.T) {
 		{
 			name:          "simple image no tag",
 			image:         "ubuntu",
-			imageTemplate: "udocker",
-			want:          "ubuntu-udocker:latest",
+			imageTemplate: "ldocker",
+			want:          "ubuntu-ldocker:latest",
 		},
 		{
 			name:          "image with tag",
 			image:         "ubuntu:22.04",
-			imageTemplate: "udocker",
-			want:          "ubuntu-udocker:22.04",
+			imageTemplate: "ldocker",
+			want:          "ubuntu-ldocker:22.04",
 		},
 		{
 			name:          "registry with port and tag",
 			image:         "registry.example.com:5000/myimage:1.0",
-			imageTemplate: "udocker",
-			want:          "registry.example.com:5000/myimage-udocker:1.0",
+			imageTemplate: "ldocker",
+			want:          "registry.example.com:5000/myimage-ldocker:1.0",
 		},
 		{
 			name:          "registry with port no tag",
 			image:         "registry.example.com:5000/myimage",
-			imageTemplate: "udocker",
-			want:          "registry.example.com:5000/myimage-udocker:latest",
+			imageTemplate: "ldocker",
+			want:          "registry.example.com:5000/myimage-ldocker:latest",
 		},
 		{
 			name:          "registry no port with tag",
 			image:         "registry.example.com/myimage:2.0",
-			imageTemplate: "udocker",
-			want:          "registry.example.com/myimage-udocker:2.0",
+			imageTemplate: "ldocker",
+			want:          "registry.example.com/myimage-ldocker:2.0",
 		},
 		{
 			name:          "digest reference",
 			image:         "ubuntu@sha256:abc123def456",
-			imageTemplate: "udocker",
-			want:          "ubuntu-udocker:latest",
+			imageTemplate: "ldocker",
+			want:          "ubuntu-ldocker:latest",
 		},
 		{
 			name:          "registry digest reference",
 			image:         "registry.example.com/myimage@sha256:abc123def456",
-			imageTemplate: "udocker",
-			want:          "registry.example.com/myimage-udocker:latest",
+			imageTemplate: "ldocker",
+			want:          "registry.example.com/myimage-ldocker:latest",
 		},
 		{
 			name:          "tagged digest reference",
 			image:         "ubuntu:22.04@sha256:abc123def456",
-			imageTemplate: "udocker",
-			want:          "ubuntu-udocker:22.04",
+			imageTemplate: "ldocker",
+			want:          "ubuntu-ldocker:22.04",
 		},
 		{
 			name:          "registry tagged digest reference",
 			image:         "registry.example.com/myimage:1.0@sha256:abc123def456",
-			imageTemplate: "udocker",
-			want:          "registry.example.com/myimage-udocker:1.0",
+			imageTemplate: "ldocker",
+			want:          "registry.example.com/myimage-ldocker:1.0",
 		},
 	}
 
@@ -122,13 +122,13 @@ func TestRunCommand(t *testing.T) {
 func withTempConfigDir(t *testing.T) string {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "udocker-docker-test-*")
+	tmpDir, err := os.MkdirTemp("", "ldocker-docker-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
 	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) })
-	t.Setenv("UDOCKER_CONFIG_DIR", tmpDir)
+	t.Setenv("LDOCKER_CONFIG_DIR", tmpDir)
 
 	if err := os.MkdirAll(filepath.Join(tmpDir, "templates"), 0o750); err != nil {
 		t.Fatalf("failed to create templates dir: %v", err)

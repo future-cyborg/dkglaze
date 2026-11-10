@@ -39,9 +39,9 @@ MAKEFILE_DIR       := $(dir $(MAKEFILE_PATH))
 # NOTE: include other makefiles only after this line
 
 DEFAULT_BRANCH     := main
-PROJECT_NAME       := udocker
-GIT_REPO           := git@github.com:future-cyborg/udocker.git
-REPO_NAME          := github.com/future-cyborg/udocker
+PROJECT_NAME       := ldocker
+GIT_REPO           := git@github.com:future-cyborg/ldocker.git
+REPO_NAME          := github.com/future-cyborg/ldocker
 
 GIT_COMMIT         := $(shell git rev-parse --short HEAD)
 GIT_DESCRIBE       := $(shell git describe --match 'v[0-9]*.[0-9]*.[0-9]*' --dirty)
@@ -346,9 +346,9 @@ tag/bump-patch-and-push: .enforce-default-branch .enforce-updated-branch
 #################
 
 .PHONY: build
-build: bin/$(LOCAL_PLATFORM)/udocker
+build: bin/$(LOCAL_PLATFORM)/ldocker
 
 .PHONY: install
 install:
-	cp $(MAKEFILE_DIR)bin/$(LOCAL_PLATFORM)/udocker $(HOME)/.local/bin/udocker
+	cp $(MAKEFILE_DIR)bin/$(LOCAL_PLATFORM)/ldocker $(HOME)/.local/bin/ldocker
 

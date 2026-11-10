@@ -7,9 +7,9 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/future-cyborg/udocker/internal/config"
-	"github.com/future-cyborg/udocker/internal/errors"
-	"github.com/future-cyborg/udocker/internal/logger"
+	"github.com/future-cyborg/ldocker/internal/config"
+	"github.com/future-cyborg/ldocker/internal/errors"
+	"github.com/future-cyborg/ldocker/internal/logger"
 )
 
 // ConfigInitCmd initializes the config directory and default config file.

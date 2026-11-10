@@ -1,6 +1,6 @@
-# udocker
+# ldocker
 
-`udocker` builds and runs personalized Docker images by layering user-specific customizations on top of an existing base image. You define **features** (named bundles of Dockerfile templates, build arguments, and run configuration) and **profiles** (ordered combinations of features) in a config file, and `udocker` handles chaining the builds, tagging the result, and running the final image.
+`ldocker` builds and runs personalized Docker images by layering user-specific customizations on top of an existing base image. You define **features** (named bundles of Dockerfile templates, build arguments, and run configuration) and **profiles** (ordered combinations of features) in a config file, and `ldocker` handles chaining the builds, tagging the result, and running the final image.
 
 A typical use case: take a standard image like `ubuntu:22.04` and automatically layer your dotfiles, user account, tools, or SSH keys on top of it — reproducibly. Switch between a minimal `default` profile and a `gpu-dev` profile with a single flag.
 
@@ -9,25 +9,25 @@ A typical use case: take a standard image like `ubuntu:22.04` and automatically 
 Requires `make` and `docker`.
 
 ```sh
-make install   # builds the binary and copies it to ~/.local/bin/udocker
+make install   # builds the binary and copies it to ~/.local/bin/ldocker
 ```
 
 ## Usage
 
 ```
-udocker <command> [flags]
+ldocker <command> [flags]
 ```
 
 | Command | Description |
 |---|---|
 | `build <image> [-- build-args...]` | Build the user layer on top of `<image>` (`--pull` to pull the latest base image first) |
 | `run <image> [-- args...]` | Run the user-layer image (builds it first if it doesn't exist) |
-| `clean [-n]` | Remove all images created by udocker (`-n` for dry run) |
-| `list` | List all images created by udocker |
+| `clean [-n]` | Remove all images created by ldocker (`-n` for dry run) |
+| `list` | List all images created by ldocker |
 | `config` | Manage configuration (see below) |
 | `completion <bash\|zsh>` | Print shell completion script to stdout |
 
-### `udocker config` subcommands
+### `ldocker config` subcommands
 
 | Subcommand | Description |
 |---|---|
@@ -44,35 +44,35 @@ udocker <command> [flags]
 
 ```
 # without --verbose
-udocker: unknown profile: "typo"
+ldocker: unknown profile: "typo"
 
 # with --verbose
-udocker: /src/internal/config/config.go:226: /src/internal/config/config.go:115: unknown profile: typo
+ldocker: /src/internal/config/config.go:226: /src/internal/config/config.go:115: unknown profile: typo
 ```
 
-**Profile flag:** `--profile <name>` (or `-p <name>`) on `build` and `run` — overrides `defaults.profile`. Resolves against both the global config and the [project-local config](#project-local-configuration) (`./.udocker.yml`), if present.
+**Profile flag:** `--profile <name>` (or `-p <name>`) on `build` and `run` — overrides `defaults.profile`. Resolves against both the global config and the [project-local config](#project-local-configuration) (`./.ldocker.yml`), if present.
 
 **Feature flag:** `--feature <name>` (or `-f <name>`, repeatable) on `run` only — adds a named feature's `run.args`/`run.mounts` to this invocation, without declaring a whole new profile. Also resolves against the merged global + project-local feature registry. See [Project-local configuration](#project-local-configuration) below.
 
 ### Examples
 
 ```sh
-udocker config init
-udocker build ubuntu:22.04
-udocker run ubuntu:22.04
+ldocker config init
+ldocker build ubuntu:22.04
+ldocker run ubuntu:22.04
 
 # Use a non-default profile
-udocker build --profile gpu-dev ubuntu:22.04
-udocker run -p gpu-dev ubuntu:22.04
+ldocker build --profile gpu-dev ubuntu:22.04
+ldocker run -p gpu-dev ubuntu:22.04
 
-udocker clean -n   # preview what would be removed
-udocker clean      # remove all udocker-managed images
+ldocker clean -n   # preview what would be removed
+ldocker clean      # remove all ldocker-managed images
 
 # Pull the latest base image before rebuilding
-udocker build --pull ubuntu:22.04
+ldocker build --pull ubuntu:22.04
 
-# Mix in ad-hoc features (e.g. repo mounts defined in ./.udocker.yml) without a dedicated profile
-udocker run -p default -f repos-team-a -f repos-team-c ubuntu:22.04
+# Mix in ad-hoc features (e.g. repo mounts defined in ./.ldocker.yml) without a dedicated profile
+ldocker run -p default -f repos-team-a -f repos-team-c ubuntu:22.04
 ```
 
 ## Shell Completion
@@ -81,52 +81,52 @@ Generate and install a completion script for your shell:
 
 ```sh
 # Bash — filename must match the command name
-udocker completion bash > ~/.local/share/bash-completion/completions/udocker
+ldocker completion bash > ~/.local/share/bash-completion/completions/ldocker
 
 # Zsh — filename must be prefixed with underscore and on $fpath
-udocker completion zsh > ~/.zsh/completions/_udocker
+ldocker completion zsh > ~/.zsh/completions/_ldocker
 ```
 
-The zsh file **must** be named `_udocker` (leading underscore) to be picked up by `compinit`.
+The zsh file **must** be named `_ldocker` (leading underscore) to be picked up by `compinit`.
 
 Completions are generated dynamically from the CLI model. Local Docker images are listed at
-tab-press time by calling `udocker _list-images` (images managed by udocker are excluded).
+tab-press time by calling `ldocker _list-images` (images managed by ldocker are excluded).
 Profile names (`-p`/`--profile`) and feature names (`-f`/`--feature`) are completed the same
-way via `udocker _list-profiles` / `udocker _list-features`, which include both the global
-config and, if present, the [project-local `.udocker.yml`](#project-local-configuration) for
+way via `ldocker _list-profiles` / `ldocker _list-features`, which include both the global
+config and, if present, the [project-local `.ldocker.yml`](#project-local-configuration) for
 the current directory.
 
 ## How it works
 
 ### Build
 
-`udocker build <image>` resolves the active profile, merges its features in order, then runs a sequence of `docker build` invocations.
+`ldocker build <image>` resolves the active profile, merges its features in order, then runs a sequence of `docker build` invocations.
 
-For each template in the merged template list, udocker:
+For each template in the merged template list, ldocker:
 
 1. Renders the `.dockerfile` template, substituting `{{ .image }}` with the current source image tag.
-2. Runs `docker build --label com.udocker=true -t <intermediate-tag> -f <rendered-dockerfile> <context-dir>` with any merged `build.args` appended as `--build-arg` flags.
+2. Runs `docker build --label com.ldocker=true -t <intermediate-tag> -f <rendered-dockerfile> <context-dir>` with any merged `build.args` appended as `--build-arg` flags.
 3. Uses the output image as the source for the next template.
 
 After all templates have run, the final intermediate image is retagged as `<base>-<suffix>:<tag>` and the intermediates are removed. If any step fails, all intermediate images are cleaned up automatically.
 
-For example, with `image = ubuntu:22.04`, `suffix = udocker`, and two templates `base` and `user`, udocker runs:
+For example, with `image = ubuntu:22.04`, `suffix = ldocker`, and two templates `base` and `user`, ldocker runs:
 
 ```
-docker build ... -t ubuntu-udocker-default.0:22.04 -f base.dockerfile  # step 0: FROM ubuntu:22.04
-docker build ... -t ubuntu-udocker-default.1:22.04 -f user.dockerfile  # step 1: FROM ubuntu-udocker-default.0:22.04
-docker tag ubuntu-udocker-default.1:22.04 ubuntu-udocker-default:22.04 # final tag
+docker build ... -t ubuntu-ldocker-default.0:22.04 -f base.dockerfile  # step 0: FROM ubuntu:22.04
+docker build ... -t ubuntu-ldocker-default.1:22.04 -f user.dockerfile  # step 1: FROM ubuntu-ldocker-default.0:22.04
+docker tag ubuntu-ldocker-default.1:22.04 ubuntu-ldocker-default:22.04 # final tag
 ```
 
 Extra args can be passed directly to every `docker build` call by appending them after `--`:
 
 ```sh
-udocker build ubuntu:22.04 -- --no-cache --build-arg FOO=bar
+ldocker build ubuntu:22.04 -- --no-cache --build-arg FOO=bar
 ```
 
 ### Run
 
-`udocker run <image>` resolves the active profile, merges its features, then runs:
+`ldocker run <image>` resolves the active profile, merges its features, then runs:
 
 ```
 docker run [merged run.args] [--volume <mount>...] [CLI args] <image>-<suffix>:<tag>
@@ -135,33 +135,33 @@ docker run [merged run.args] [--volume <mount>...] [CLI args] <image>-<suffix>:<
 Mounts from `run.mounts` are expanded (`~` and `$VAR`) and passed as `--volume` flags before any CLI args. This lets you set persistent volume mounts in config while still passing one-off flags at runtime:
 
 ```sh
-udocker run ubuntu:22.04 -- -e DEBUG=1
-# executes: docker run -it --rm --volume /home/alice/.config/opencode:/root/.config/opencode -e DEBUG=1 ubuntu-udocker:22.04
+ldocker run ubuntu:22.04 -- -e DEBUG=1
+# executes: docker run -it --rm --volume /home/alice/.config/opencode:/root/.config/opencode -e DEBUG=1 ubuntu-ldocker:22.04
 ```
 
 ## Configuration
 
-Config lives at `~/.config/udocker/config.yml`. Run `udocker config init` to create it with defaults.
+Config lives at `~/.config/ldocker/config.yml`. Run `ldocker config init` to create it with defaults.
 
-To use a different config directory (useful for testing or multiple configurations), set the `UDOCKER_CONFIG_DIR` environment variable:
+To use a different config directory (useful for testing or multiple configurations), set the `LDOCKER_CONFIG_DIR` environment variable:
 
 ```sh
-UDOCKER_CONFIG_DIR=~/my-other-config udocker build ubuntu:22.04
+LDOCKER_CONFIG_DIR=~/my-other-config ldocker build ubuntu:22.04
 ```
 
 All configuration is organized into **features** and **profiles**. There are no top-level `build` or `run` sections.
 
 ```yaml
 defaults:
-  suffix: udocker     # (required) Appended to base image name along with the active profile name.
-                      # e.g. ubuntu:22.04 + suffix "udocker" + profile "default" → ubuntu-udocker-default:22.04
+  suffix: ldocker     # (required) Appended to base image name along with the active profile name.
+                      # e.g. ubuntu:22.04 + suffix "ldocker" + profile "default" → ubuntu-ldocker-default:22.04
   profile: default    # (required) Profile used when --profile flag is not set
 
 features:
   base:
     build:
       templates:      # Ordered list of Dockerfile template names applied in sequence.
-        - base        # Resolves to ~/.config/udocker/templates/base.dockerfile
+        - base        # Resolves to ~/.config/ldocker/templates/base.dockerfile
       args:
         - key: USERNAME
           value: alice              # Static value.
@@ -240,10 +240,10 @@ profiles:
 
 ### Project-local configuration
 
-For a per-project or per-workspace set of features and profiles — e.g. a tree of cloned repos where you want to mount only a task-relevant subset into the container — `udocker` also looks for a `.udocker.yml` file in the **current directory** (the directory you run `udocker` from, not a parent or git root). It is entirely optional and additive to the global config.
+For a per-project or per-workspace set of features and profiles — e.g. a tree of cloned repos where you want to mount only a task-relevant subset into the container — `ldocker` also looks for a `.ldocker.yml` file in the **current directory** (the directory you run `ldocker` from, not a parent or git root). It is entirely optional and additive to the global config.
 
 ```yaml
-# ./.udocker.yml
+# ./.ldocker.yml
 defaults:
   profile: agent-a  # overrides the global config's defaults.profile when -p is not given
 
@@ -269,46 +269,46 @@ profiles:
 ```sh
 cd ~/projects   # workspace root containing team-a/, team-b/, team-c/...
 
-# no -p needed — ./.udocker.yml's defaults.profile selects agent-a
-udocker run myimage
+# no -p needed — ./.ldocker.yml's defaults.profile selects agent-a
+ldocker run myimage
 
 # a named, reusable local profile — tab-completable, mixes global + local features
-udocker run -p agent-a myimage
+ldocker run -p agent-a myimage
 
 # or compose ad hoc, on top of a plain global profile
-udocker run -p default-no-mount myimage -f repos-team-a -f repos-team-c
+ldocker run -p default-no-mount myimage -f repos-team-a -f repos-team-c
 ```
 
 A few rules keep this predictable and safe:
 
-- **Discovery is current-directory only** — no walking up to a parent or git root. Set `UDOCKER_LOCAL_CONFIG=/path/to/file.yml` to point at a different file explicitly; if that variable is set and the file is missing, `udocker` errors (whereas a missing default `./.udocker.yml` is simply ignored).
+- **Discovery is current-directory only** — no walking up to a parent or git root. Set `LDOCKER_LOCAL_CONFIG=/path/to/file.yml` to point at a different file explicitly; if that variable is set and the file is missing, `ldocker` errors (whereas a missing default `./.ldocker.yml` is simply ignored).
 - **Local features cannot define `build:`** — only `run.args`/`run.mounts`. A `build:` key under a local feature is a parse error. This keeps the project-local file (which may be committed and shared/cloned) unable to change what gets built or run arbitrary commands at build time; it can only add run-time arguments and mounts.
-- **Names must not collide** with the global config. If a local feature or profile shares a name with a global one, `udocker` errors rather than silently shadowing it.
-- **Local profiles can mix local and global features** (as in the `agent-a` example above) and work for both `udocker build -p <name>` and `udocker run -p <name>`, exactly like global profiles.
+- **Names must not collide** with the global config. If a local feature or profile shares a name with a global one, `ldocker` errors rather than silently shadowing it.
+- **Local profiles can mix local and global features** (as in the `agent-a` example above) and work for both `ldocker build -p <name>` and `ldocker run -p <name>`, exactly like global profiles.
 - **A local (or global) profile can `extends` another profile** — see [Profile resolution](#profile-resolution) — so a local profile only needs to list what it adds on top of an existing (typically global) profile, instead of duplicating its whole feature list.
-- **`defaults.profile` in `./.udocker.yml` overrides the global config's `defaults.profile`** when `-p` is not given, letting a project pick its own default profile without touching the global config. Precedence is: `-p` flag > local `defaults.profile` > global `defaults.profile`. It must name a profile that exists (local or global) once merged, or `udocker` errors.
+- **`defaults.profile` in `./.ldocker.yml` overrides the global config's `defaults.profile`** when `-p` is not given, letting a project pick its own default profile without touching the global config. Precedence is: `-p` flag > local `defaults.profile` > global `defaults.profile`. It must name a profile that exists (local or global) once merged, or `ldocker` errors.
 - **`-f/--feature <name>` is `run`-only** and applies only a feature's `run.args`/`run.mounts` — its `build.*` is ignored (with a warning if present), since the image tag is derived from the *profile* name, not from `-f` selections. This means one built image is reused no matter which `-f` combination you pass at runtime.
-- **Local-sourced selections are never silent.** Whenever `run` resolves a profile or feature that came from `./.udocker.yml` — including a profile picked only because of local `defaults.profile`, or a profile reached via an `extends` chain — it prints a warning naming it and the local file path, so you always know when a run depends on something outside the global config. `-n`/dry-run still prints the exact resulting command either way.
+- **Local-sourced selections are never silent.** Whenever `run` resolves a profile or feature that came from `./.ldocker.yml` — including a profile picked only because of local `defaults.profile`, or a profile reached via an `extends` chain — it prints a warning naming it and the local file path, so you always know when a run depends on something outside the global config. `-n`/dry-run still prints the exact resulting command either way.
 - Both local and global feature/profile names are tab-completable (see [Shell Completion](#shell-completion)).
 
 ### Dockerfile templates
 
-Templates live in `~/.config/udocker/templates/` and use Go's [`text/template`](https://pkg.go.dev/text/template) syntax. The only variable provided is `{{ .image }}`, which holds the source image tag for that build step.
+Templates live in `~/.config/ldocker/templates/` and use Go's [`text/template`](https://pkg.go.dev/text/template) syntax. The only variable provided is `{{ .image }}`, which holds the source image tag for that build step.
 
 ```dockerfile
-# ~/.config/udocker/templates/base.dockerfile
+# ~/.config/ldocker/templates/base.dockerfile
 FROM {{ .image }}
 RUN apt-get update && apt-get install -y vim git
 
-# ~/.config/udocker/templates/user.dockerfile
+# ~/.config/ldocker/templates/user.dockerfile
 FROM {{ .image }}
 ARG USERNAME
 RUN useradd -m $USERNAME
 ```
 
-**Build context:** if a directory `~/.config/udocker/templates/<name>/` exists, it is used as the Docker build context for that step (useful for `COPY` instructions). Otherwise the `templates/` directory itself is used.
+**Build context:** if a directory `~/.config/ldocker/templates/<name>/` exists, it is used as the Docker build context for that step (useful for `COPY` instructions). Otherwise the `templates/` directory itself is used.
 
-Every image built by `udocker` is labeled `com.udocker=true`, which is how `udocker clean` finds and removes them.
+Every image built by `ldocker` is labeled `com.ldocker=true`, which is how `ldocker clean` finds and removes them.
 
 ## Development
 

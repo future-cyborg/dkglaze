@@ -1,5 +1,5 @@
 defaults:
-  suffix: udocker
+  suffix: ldocker
   profile: default
 
 features:

@@ -1,6 +1,6 @@
 package docker
 
-import "github.com/future-cyborg/udocker/internal/config"
+import "github.com/future-cyborg/ldocker/internal/config"
 
 func ExportedNewImageName(image, imageTemplate string) string {
 	return newImageName(image, imageTemplate)

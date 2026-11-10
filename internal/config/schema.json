@@ -1,6 +1,6 @@
 {
-    "title": "udocker config",
-    "description": "Configuration for udocker",
+    "title": "ldocker config",
+    "description": "Configuration for ldocker",
     "type": "object",
     "properties":
     {

@@ -1,4 +1,4 @@
-// Package main is the entry point for the udocker CLI.
+// Package main is the entry point for the ldocker CLI.
 package main
 
 import (
@@ -12,10 +12,10 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/future-cyborg/udocker/internal/config"
-	"github.com/future-cyborg/udocker/internal/docker"
-	"github.com/future-cyborg/udocker/internal/errors"
-	"github.com/future-cyborg/udocker/internal/logger"
+	"github.com/future-cyborg/ldocker/internal/config"
+	"github.com/future-cyborg/ldocker/internal/docker"
+	"github.com/future-cyborg/ldocker/internal/errors"
+	"github.com/future-cyborg/ldocker/internal/logger"
 )
 
 // Context holds global CLI context.
@@ -46,7 +46,7 @@ type RunCmd struct {
 	Image    string   `arg:"" name:"image" help:"Image to run user-layer on top of" completion:"images"`
 	RunArgs  []string `arg:"" optional:"" name:"args" help:"Arguments passed to docker run"`
 	Profile  string   `short:"p" name:"profile" completion:"profiles" help:"Profile to activate (overrides defaults.profile)."`                                                                  //nolint:revive,lll // keep descriptive help text
-	Features []string `short:"f" name:"feature" completion:"features" help:"Add named feature(s) from config or ./.udocker.yml (run only; build config on the feature is ignored). Repeatable."` //nolint:revive,lll // keep descriptive help text
+	Features []string `short:"f" name:"feature" completion:"features" help:"Add named feature(s) from config or ./.ldocker.yml (run only; build config on the feature is ignored). Repeatable."` //nolint:revive,lll // keep descriptive help text
 	DryRun   bool     `short:"n" help:"Dry run. Print commands without executing."`
 }
 
@@ -94,7 +94,7 @@ func (cmd *CompletionCmd) Run(_ *Context, k *kong.Kong) error {
 type listImagesCmd struct{}
 
 func (*listImagesCmd) Run(ctx *Context) error {
-	images, err := docker.ListNonUdockerImages(ctx.Ctx)
+	images, err := docker.ListNonLdockerImages(ctx.Ctx)
 	if err != nil {
 		return errors.Wrap(err)
 	}

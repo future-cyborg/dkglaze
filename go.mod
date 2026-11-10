@@ -1,4 +1,4 @@
-module github.com/future-cyborg/udocker
+module github.com/future-cyborg/ldocker
 
 go 1.26
 
