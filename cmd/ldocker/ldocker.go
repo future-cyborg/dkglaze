@@ -26,11 +26,12 @@ type Context struct {
 
 // BuildCmd is the build subcommand.
 type BuildCmd struct {
-	Image     string   `arg:"" name:"image" help:"Image to build FROM" completion:"images"`
-	BuildArgs []string `arg:"" optional:"" name:"build-args" help:"Build arguments passed to docker build."`
-	Profile   string   `short:"p" name:"profile" completion:"profiles" help:"Profile to activate (overrides defaults.profile)."` //nolint:revive,lll // keep descriptive help text
-	Pull      bool     `name:"pull" help:"Pull the latest base image before building."`
-	DryRun    bool     `short:"n" help:"Dry run. Print commands without executing."`
+	Image           string   `arg:"" name:"image" help:"Image to build FROM" completion:"images"`
+	BuildArgs       []string `arg:"" optional:"" name:"build-args" help:"Build arguments passed to docker build."`
+	Profile         string   `short:"p" name:"profile" completion:"profiles" help:"Profile to activate (overrides defaults.profile)."` //nolint:revive,lll // keep descriptive help text
+	Pull            bool     `name:"pull" help:"Pull the latest base image before building."`
+	DryRun          bool     `short:"n" help:"Dry run. Print commands without executing."`
+	TrustLocalShell bool     `name:"trust" help:"Allow run.args/run.mounts from project-local .ldocker.yml to be shell-expanded. Can execute arbitrary commands — only use for a trusted .ldocker.yml."` //nolint:revive,lll // keep descriptive help text
 }
 
 func (*BuildCmd) Help() string {
@@ -38,16 +39,19 @@ func (*BuildCmd) Help() string {
 }
 
 func (cmd *BuildCmd) Run(ctx *Context) error {
-	return errors.Wrap(docker.Build(ctx.Ctx, cmd.Image, cmd.BuildArgs, cmd.Profile, cmd.Pull, cmd.DryRun))
+	return errors.Wrap(docker.Build(
+		ctx.Ctx, cmd.Image, cmd.BuildArgs, cmd.Profile, cmd.Pull, cmd.DryRun, cmd.TrustLocalShell,
+	))
 }
 
 // RunCmd is the run subcommand.
 type RunCmd struct {
-	Image    string   `arg:"" name:"image" help:"Image to run user-layer on top of" completion:"images"`
-	RunArgs  []string `arg:"" optional:"" name:"args" help:"Arguments passed to docker run"`
-	Profile  string   `short:"p" name:"profile" completion:"profiles" help:"Profile to activate (overrides defaults.profile)."`                                                                  //nolint:revive,lll // keep descriptive help text
-	Features []string `short:"f" name:"feature" completion:"features" help:"Add named feature(s) from config or ./.ldocker.yml (run only; build config on the feature is ignored). Repeatable."` //nolint:revive,lll // keep descriptive help text
-	DryRun   bool     `short:"n" help:"Dry run. Print commands without executing."`
+	Image           string   `arg:"" name:"image" help:"Image to run user-layer on top of" completion:"images"`
+	RunArgs         []string `arg:"" optional:"" name:"args" help:"Arguments passed to docker run"`
+	Profile         string   `short:"p" name:"profile" completion:"profiles" help:"Profile to activate (overrides defaults.profile)."`                                                                  //nolint:revive,lll // keep descriptive help text
+	Features        []string `short:"f" name:"feature" completion:"features" help:"Add named feature(s) from config or ./.ldocker.yml (run only; build config on the feature is ignored). Repeatable."` //nolint:revive,lll // keep descriptive help text
+	DryRun          bool     `short:"n" help:"Dry run. Print commands without executing."`
+	TrustLocalShell bool     `name:"trust" help:"Allow run.args/run.mounts from project-local .ldocker.yml to be shell-expanded. Can execute arbitrary commands — only use for a trusted .ldocker.yml."` //nolint:revive,lll // keep descriptive help text
 }
 
 func (*RunCmd) Help() string {
@@ -55,7 +59,9 @@ func (*RunCmd) Help() string {
 }
 
 func (cmd *RunCmd) Run(ctx *Context) error {
-	return errors.Wrap(docker.Run(ctx.Ctx, cmd.Image, cmd.RunArgs, cmd.Profile, cmd.Features, cmd.DryRun))
+	return errors.Wrap(docker.Run(
+		ctx.Ctx, cmd.Image, cmd.RunArgs, cmd.Profile, cmd.Features, cmd.DryRun, cmd.TrustLocalShell,
+	))
 }
 
 // CleanCmd is the clean subcommand.

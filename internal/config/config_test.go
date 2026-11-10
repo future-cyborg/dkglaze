@@ -229,7 +229,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile(context.Background(), "default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default", false)
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -303,7 +303,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile(context.Background(), "combined")
+	resolved, err := conf.ResolveProfile(context.Background(), "combined", false)
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestResolveProfile_UnknownProfileReturnsError(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile(context.Background(), "nonexistent")
+	_, err = conf.ResolveProfile(context.Background(), "nonexistent", false)
 	if err == nil {
 		t.Error("expected error for unknown profile, got nil")
 	}
@@ -382,7 +382,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile(context.Background(), "bad")
+	_, err = conf.ResolveProfile(context.Background(), "bad", false)
 	if err == nil {
 		t.Error("expected error for unknown feature, got nil")
 	}
@@ -424,7 +424,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile(context.Background(), "default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default", false)
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -477,7 +477,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile(context.Background(), "default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default", false)
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -528,7 +528,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile(context.Background(), "default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default", false)
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -579,7 +579,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile(context.Background(), "default")
+	_, err = conf.ResolveProfile(context.Background(), "default", false)
 	if err == nil {
 		t.Error("expected error for undefined env var in mount, got nil")
 	}
@@ -621,7 +621,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile(context.Background(), "default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default", false)
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -648,7 +648,7 @@ func TestResolveProfile_ResolvedSuffixIncludesProfileName(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile(context.Background(), conf.Defaults.Profile)
+	resolved, err := conf.ResolveProfile(context.Background(), conf.Defaults.Profile, false)
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -693,7 +693,7 @@ func writeAndResolve(t *testing.T, cfg string) (*config.ResolvedConfig, error) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile(context.Background(), "default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default", false)
 	if err != nil {
 		return nil, fmt.Errorf("resolve profile: %w", err)
 	}
@@ -897,7 +897,7 @@ profiles:
 		return
 	}
 
-	_, err = conf.ResolveProfile(context.Background(), "default")
+	_, err = conf.ResolveProfile(context.Background(), "default", false)
 	if err == nil {
 		t.Error("expected error when both value and cmd are set, got nil")
 	}
@@ -939,7 +939,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile(context.Background(), "default")
+	_, err = conf.ResolveProfile(context.Background(), "default", false)
 	if err == nil {
 		t.Error("expected error when neither value nor cmd is set, got nil")
 	}
@@ -964,7 +964,7 @@ func TestPopulateArg_CmdExitsNonZeroWithStderr(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile(context.Background(), "default")
+	_, err = conf.ResolveProfile(context.Background(), "default", false)
 	if err == nil {
 		t.Error("expected error for non-zero exit with stderr, got nil")
 	}
@@ -989,7 +989,7 @@ func TestPopulateArg_CmdExitsNonZeroWithoutStderr(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, err = conf.ResolveProfile(context.Background(), "default")
+	_, err = conf.ResolveProfile(context.Background(), "default", false)
 	if err == nil {
 		t.Error("expected error for non-zero exit without stderr, got nil")
 	}
@@ -1030,7 +1030,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	resolved, err := conf.ResolveProfile(context.Background(), "default")
+	resolved, err := conf.ResolveProfile(context.Background(), "default", false)
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -1531,7 +1531,7 @@ profiles:
 		t.Fatalf("load error: %v", err)
 	}
 
-	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "myfeat")
+	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "myfeat", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1581,7 +1581,7 @@ func TestResolveFeatureRunOnly_UnknownFeatureReturnsError(t *testing.T) {
 		t.Fatalf("load error: %v", err)
 	}
 
-	_, _, _, err = conf.ResolveFeatureRunOnly(context.Background(), "nonexistent-feature")
+	_, _, _, err = conf.ResolveFeatureRunOnly(context.Background(), "nonexistent-feature", false)
 	if err == nil {
 		t.Fatal("expected error for unknown feature, got nil")
 	}
@@ -1609,7 +1609,7 @@ func TestResolveFeatureRunOnly_HasBuildTrueWhenTemplatesPresent(t *testing.T) {
 		},
 	}
 
-	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "build-feat")
+	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "build-feat", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1645,7 +1645,7 @@ func TestResolveFeatureRunOnly_HasBuildTrueWhenArgsPresent(t *testing.T) {
 		},
 	}
 
-	args, _, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "build-feat")
+	args, _, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "build-feat", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1675,7 +1675,7 @@ func TestResolveFeatureRunOnly_HasBuildFalseWhenBuildEmpty(t *testing.T) {
 		},
 	}
 
-	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "run-only")
+	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "run-only", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1712,7 +1712,7 @@ func TestResolveFeatureRunOnly_IgnoresBuildContent(t *testing.T) {
 		},
 	}
 
-	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "mixed")
+	args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(context.Background(), "mixed", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1769,7 +1769,7 @@ func TestResolveProfile_ExtendsMergesBaseThenOwnFeatures(t *testing.T) {
 		},
 	}
 
-	resolved, err := conf.ResolveProfile(context.Background(), "agent-a")
+	resolved, err := conf.ResolveProfile(context.Background(), "agent-a", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1927,5 +1927,255 @@ func TestMergeLocal_NoLocalDefaultLeavesGlobalDefaultUnchanged(t *testing.T) {
 
 	if prov.DefaultFromLocal {
 		t.Error("expected prov.DefaultFromLocal to be false")
+	}
+}
+
+// newLocalShellTestConfig returns a trusted global config with one run-only
+// feature ("base") and a "default" profile that uses it.
+func newLocalShellTestConfig() *config.Config {
+	return &config.Config{
+		Defaults: config.Defaults{Suffix: "test", Profile: "default"},
+		Features: map[string]config.Feature{
+			"base": {Run: config.Run{Args: []string{"--rm"}}},
+		},
+		Profiles: map[string]config.Profile{
+			"default": {Features: []string{"base"}},
+		},
+	}
+}
+
+// loadLocalConfigForTest writes yml to a project-local config file, points
+// LDOCKER_LOCAL_CONFIG at it, and parses it via LoadLocalConfig.
+func loadLocalConfigForTest(t *testing.T, yml string) *config.LocalConfig {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), ".ldocker.yml")
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatalf("failed to write local config: %v", err)
+	}
+
+	t.Setenv("LDOCKER_LOCAL_CONFIG", path)
+
+	local, err := config.LoadLocalConfig()
+	if err != nil {
+		t.Fatalf("load local config error: %v", err)
+	}
+
+	return local
+}
+
+// shellSentinelPath returns a file path that is only created if a shell
+// command embedded in a config value is actually executed.
+func shellSentinelPath(t *testing.T) string {
+	t.Helper()
+
+	return filepath.Join(t.TempDir(), "pwned")
+}
+
+func assertNotExecuted(t *testing.T, sentinel string) {
+	t.Helper()
+
+	if _, err := os.Stat(sentinel); !goerrors.Is(err, os.ErrNotExist) {
+		t.Fatalf("untrusted local config command was executed (sentinel %s present, stat err: %v)", sentinel, err)
+	}
+}
+
+func assertExecuted(t *testing.T, sentinel string) {
+	t.Helper()
+
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("expected trusted local config command to run, sentinel %s missing: %v", sentinel, err)
+	}
+}
+
+// localShellMountYAML defines a local run-only feature whose mount embeds a
+// command substitution that would create sentinel if executed.
+func localShellMountYAML(sentinel string) string {
+	return fmt.Sprintf(`features:
+  evil:
+    run:
+      mounts:
+        - "~/.bashrc:/home/$(touch '%s'):ro"
+profiles:
+  local-profile:
+    features:
+      - base
+      - evil
+`, sentinel)
+}
+
+// localShellArgYAML defines a local run-only feature whose arg embeds a
+// command substitution that would create sentinel if executed.
+func localShellArgYAML(sentinel string) string {
+	return fmt.Sprintf(`features:
+  evil:
+    run:
+      args:
+        - "$(touch '%s')"
+profiles:
+  local-profile:
+    features:
+      - evil
+`, sentinel)
+}
+
+func TestResolveProfile_LocalMountShellRequiresTrust(t *testing.T) {
+	sentinel := shellSentinelPath(t)
+	conf := newLocalShellTestConfig()
+
+	if _, err := conf.MergeLocal(loadLocalConfigForTest(t, localShellMountYAML(sentinel))); err != nil {
+		t.Fatalf("merge local error: %v", err)
+	}
+
+	_, err := conf.ResolveProfile(context.Background(), "local-profile", false)
+	if !goerrors.Is(err, config.ErrLocalShellNotTrusted) {
+		t.Fatalf("expected ErrLocalShellNotTrusted from ResolveProfile, got: %v", err)
+	}
+
+	if !strings.Contains(err.Error(), `feature "evil"`) {
+		t.Errorf("expected error to name the local feature, got: %v", err)
+	}
+
+	assertNotExecuted(t, sentinel)
+
+	_, err = conf.ResolveProfileNoArgs(context.Background(), "local-profile", false)
+	if !goerrors.Is(err, config.ErrLocalShellNotTrusted) {
+		t.Fatalf("expected ErrLocalShellNotTrusted from ResolveProfileNoArgs, got: %v", err)
+	}
+
+	assertNotExecuted(t, sentinel)
+}
+
+func TestResolveProfile_LocalMountShellExpandsWithTrust(t *testing.T) {
+	sentinel := shellSentinelPath(t)
+	conf := newLocalShellTestConfig()
+
+	if _, err := conf.MergeLocal(loadLocalConfigForTest(t, localShellMountYAML(sentinel))); err != nil {
+		t.Fatalf("merge local error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfile(context.Background(), "local-profile", true)
+	if err != nil {
+		t.Fatalf("unexpected error with trustLocal=true: %v", err)
+	}
+
+	assertExecuted(t, sentinel)
+
+	if len(resolved.Run.Mounts) != 1 || strings.Contains(resolved.Run.Mounts[0], "$(") ||
+		!strings.HasSuffix(resolved.Run.Mounts[0], "/home/:ro") {
+		t.Errorf("expected expanded local mount, got %v", resolved.Run.Mounts)
+	}
+}
+
+func TestResolveProfileNoArgs_LocalArgShellRequiresTrust(t *testing.T) {
+	sentinel := shellSentinelPath(t)
+	conf := newLocalShellTestConfig()
+
+	if _, err := conf.MergeLocal(loadLocalConfigForTest(t, localShellArgYAML(sentinel))); err != nil {
+		t.Fatalf("merge local error: %v", err)
+	}
+
+	_, err := conf.ResolveProfileNoArgs(context.Background(), "local-profile", false)
+	if !goerrors.Is(err, config.ErrLocalShellNotTrusted) {
+		t.Fatalf("expected ErrLocalShellNotTrusted, got: %v", err)
+	}
+
+	assertNotExecuted(t, sentinel)
+
+	if _, err := conf.ResolveProfileNoArgs(context.Background(), "local-profile", true); err != nil {
+		t.Fatalf("unexpected error with trustLocal=true: %v", err)
+	}
+
+	assertExecuted(t, sentinel)
+}
+
+func TestResolveFeatureRunOnly_LocalFeatureRequiresTrust(t *testing.T) {
+	sentinel := shellSentinelPath(t)
+	conf := newLocalShellTestConfig()
+
+	if _, err := conf.MergeLocal(loadLocalConfigForTest(t, localShellMountYAML(sentinel))); err != nil {
+		t.Fatalf("merge local error: %v", err)
+	}
+
+	_, _, _, err := conf.ResolveFeatureRunOnly(context.Background(), "evil", false)
+	if !goerrors.Is(err, config.ErrLocalShellNotTrusted) {
+		t.Fatalf("expected ErrLocalShellNotTrusted, got: %v", err)
+	}
+
+	assertNotExecuted(t, sentinel)
+
+	_, mounts, _, err := conf.ResolveFeatureRunOnly(context.Background(), "evil", true)
+	if err != nil {
+		t.Fatalf("unexpected error with trustLocal=true: %v", err)
+	}
+
+	assertExecuted(t, sentinel)
+
+	if len(mounts) != 1 {
+		t.Errorf("expected 1 expanded mount, got %v", mounts)
+	}
+}
+
+func TestResolveProfile_LocalFeatureWithEmptyRunNeedsNoTrust(t *testing.T) {
+	conf := newLocalShellTestConfig()
+
+	local := loadLocalConfigForTest(t, `features:
+  plain:
+    run:
+      args: []
+      mounts: []
+profiles:
+  local-profile:
+    features:
+      - base
+      - plain
+`)
+
+	if _, err := conf.MergeLocal(local); err != nil {
+		t.Fatalf("merge local error: %v", err)
+	}
+
+	if _, err := conf.ResolveProfile(context.Background(), "local-profile", false); err != nil {
+		t.Errorf("unexpected error for empty local run with ResolveProfile: %v", err)
+	}
+
+	if _, err := conf.ResolveProfileNoArgs(context.Background(), "local-profile", false); err != nil {
+		t.Errorf("unexpected error for empty local run with ResolveProfileNoArgs: %v", err)
+	}
+
+	args, mounts, _, err := conf.ResolveFeatureRunOnly(context.Background(), "plain", false)
+	if err != nil {
+		t.Errorf("unexpected error for empty local run with ResolveFeatureRunOnly: %v", err)
+	}
+
+	if len(args) != 0 || len(mounts) != 0 {
+		t.Errorf("expected no args or mounts, got args=%v mounts=%v", args, mounts)
+	}
+}
+
+func TestResolveProfileNoArgs_GlobalShellStillExpandsWhenLocalUntrusted(t *testing.T) {
+	conf := newLocalShellTestConfig()
+	conf.Features["global-sub"] = config.Feature{Run: config.Run{Args: []string{"$(echo global-ok)"}}}
+	conf.Profiles["default"] = config.Profile{Features: []string{"base", "global-sub"}}
+
+	// A local config is merged (so the untrusted gate is active) but contains
+	// no run values to expand.
+	local := loadLocalConfigForTest(t, `features:
+  plain:
+    run:
+      args: []
+`)
+
+	if _, err := conf.MergeLocal(local); err != nil {
+		t.Fatalf("merge local error: %v", err)
+	}
+
+	resolved, err := conf.ResolveProfileNoArgs(context.Background(), "default", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(resolved.Run.Args) != 2 || resolved.Run.Args[0] != "--rm" || resolved.Run.Args[1] != "global-ok" {
+		t.Errorf("expected global run args to be shell-expanded, got %v", resolved.Run.Args)
 	}
 }

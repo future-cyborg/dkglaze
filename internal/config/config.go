@@ -37,6 +37,14 @@ var (
 
 	// ErrLocalNameCollision is returned when a local config name collides with a global one.
 	ErrLocalNameCollision = goerrors.New("name already defined in global config")
+
+	// ErrLocalShellNotTrusted is returned when a feature from the project-local config
+	// defines run.args/run.mounts (which are shell-expanded) without the caller
+	// having opted in to trusting the local config.
+	ErrLocalShellNotTrusted = goerrors.New(
+		"local config defines run.args/run.mounts that require shell expansion; " +
+			"pass --trust only if you trust this project's .ldocker.yml",
+	)
 )
 
 // Config represents the configuration.
@@ -44,6 +52,10 @@ type Config struct {
 	Defaults Defaults           `yaml:"defaults"`
 	Features map[string]Feature `yaml:"features"`
 	Profiles map[string]Profile `yaml:"profiles"`
+
+	// localProv records which names were merged in from the project-local
+	// config by MergeLocal. Nil when no local config has been merged.
+	localProv *LocalProvenance
 }
 
 // Defaults represents configuration for the default values.
@@ -312,22 +324,40 @@ func (conf *Config) MergeLocal(local *LocalConfig) (*LocalProvenance, error) {
 		prov.Profiles[name] = true
 	}
 
-	if local.Defaults.Profile != "" {
-		if _, ok := conf.Profiles[local.Defaults.Profile]; !ok {
-			return nil, errors.Wrap(fmt.Errorf("%w: %q", errDefaultProfile, local.Defaults.Profile))
-		}
-
-		conf.Defaults.Profile = local.Defaults.Profile
-		prov.DefaultFromLocal = true
+	if err := conf.applyLocalDefaultProfile(local, prov); err != nil {
+		return nil, err
 	}
+
+	conf.localProv = prov
 
 	return prov, nil
 }
 
+// applyLocalDefaultProfile makes the local defaults.profile, if set, the active
+// default profile and records that it came from the local config.
+func (conf *Config) applyLocalDefaultProfile(local *LocalConfig, prov *LocalProvenance) error {
+	if local.Defaults.Profile == "" {
+		return nil
+	}
+
+	if _, ok := conf.Profiles[local.Defaults.Profile]; !ok {
+		return errors.Wrap(fmt.Errorf("%w: %q", errDefaultProfile, local.Defaults.Profile))
+	}
+
+	conf.Defaults.Profile = local.Defaults.Profile
+	prov.DefaultFromLocal = true
+
+	return nil
+}
+
 // ResolveProfile merges the named profile's features in order and evaluates
 // cmd-type build args. Use ResolveProfileNoArgs when build args are not needed.
-func (conf *Config) ResolveProfile(ctx context.Context, name string) (*ResolvedConfig, error) {
-	resolved, err := conf.mergeProfile(ctx, name)
+//
+// trustLocal permits run.args/run.mounts from the project-local config to be
+// shell-expanded. When false, a local feature with non-empty run.args or
+// run.mounts makes this return ErrLocalShellNotTrusted before anything is executed.
+func (conf *Config) ResolveProfile(ctx context.Context, name string, trustLocal bool) (*ResolvedConfig, error) {
+	resolved, err := conf.mergeProfile(ctx, name, trustLocal)
 	if err != nil {
 		return nil, err
 	}
@@ -344,9 +374,10 @@ func (conf *Config) ResolveProfile(ctx context.Context, name string) (*ResolvedC
 }
 
 // ResolveProfileNoArgs merges the named profile's features without evaluating
-// cmd-type build args. Use this for the run command.
-func (conf *Config) ResolveProfileNoArgs(ctx context.Context, name string) (*ResolvedConfig, error) {
-	resolved, err := conf.mergeProfile(ctx, name)
+// cmd-type build args. Use this for the run command. See ResolveProfile for
+// the meaning of trustLocal.
+func (conf *Config) ResolveProfileNoArgs(ctx context.Context, name string, trustLocal bool) (*ResolvedConfig, error) {
+	resolved, err := conf.mergeProfile(ctx, name, trustLocal)
 	if err != nil {
 		return nil, err
 	}
@@ -362,15 +393,23 @@ func (conf *Config) ResolveProfileNoArgs(ctx context.Context, name string) (*Res
 // expanded Run.Args and Run.Mounts. Build content is ignored by the caller;
 // hasBuild reports whether the feature had non-empty Build content, so callers
 // can warn. Returns errUnknownFeature if the feature name is not found.
+// See ResolveProfile for the meaning of trustLocal; ErrLocalShellNotTrusted is
+// returned for an untrusted local feature with run.args/run.mounts.
 //
-//nolint:revive,lll // function-result-limit: args/mounts/hasBuild/err are clearer as separate return values
-func (conf *Config) ResolveFeatureRunOnly(ctx context.Context, name string) (args, mounts []string, hasBuild bool, err error) {
+//nolint:revive // function-result-limit: args/mounts/hasBuild/err are clearer as separate return values
+func (conf *Config) ResolveFeatureRunOnly(
+	ctx context.Context, name string, trustLocal bool,
+) (args, mounts []string, hasBuild bool, err error) {
 	feature, ok := conf.Features[name]
 	if !ok {
 		return nil, nil, false, errors.Wrap(fmt.Errorf("%w: %s", errUnknownFeature, name))
 	}
 
 	hasBuild = len(feature.Build.Templates) > 0 || len(feature.Build.Args) > 0
+
+	if err := conf.requireLocalShellTrust(name, &feature, trustLocal); err != nil {
+		return nil, nil, hasBuild, err
+	}
 
 	expandedArgs, err := expandRunArgList(ctx, feature.Run.Args)
 	if err != nil {
@@ -434,7 +473,7 @@ func (conf *Config) ResolveFeatureNames(name string) ([]string, error) {
 	return names, nil
 }
 
-func (conf *Config) mergeProfile(ctx context.Context, name string) (*ResolvedConfig, error) {
+func (conf *Config) mergeProfile(ctx context.Context, name string, trustLocal bool) (*ResolvedConfig, error) {
 	featureNames, err := conf.ResolveFeatureNames(name)
 	if err != nil {
 		return nil, err
@@ -446,6 +485,10 @@ func (conf *Config) mergeProfile(ctx context.Context, name string) (*ResolvedCon
 		feature, ok := conf.Features[featureName]
 		if !ok {
 			return nil, errors.Wrap(fmt.Errorf("%w: %s", errUnknownFeature, featureName))
+		}
+
+		if err := conf.requireLocalShellTrust(featureName, &feature, trustLocal); err != nil {
+			return nil, err
 		}
 
 		resolved.Build.Templates = append(resolved.Build.Templates, feature.Build.Templates...)
@@ -461,6 +504,29 @@ func (conf *Config) mergeProfile(ctx context.Context, name string) (*ResolvedCon
 	}
 
 	return resolved, nil
+}
+
+// requireLocalShellTrust fails closed when the named feature came from the
+// project-local config and carries run.args/run.mounts (which are shell-expanded)
+// but the caller has not opted in with trustLocal. It must be called before any
+// expansion of the feature's Run values so that nothing is executed.
+//
+//nolint:revive // flag-parameter: trustLocal is the explicit opt-in gate and reads clearest as a bool
+func (conf *Config) requireLocalShellTrust(name string, feature *Feature, trustLocal bool) error {
+	if trustLocal || conf.localProv == nil || !conf.localProv.Features[name] {
+		return nil
+	}
+
+	if len(feature.Run.Args) == 0 && len(feature.Run.Mounts) == 0 {
+		return nil
+	}
+
+	path, _, err := GetLocalConfigPath()
+	if err != nil {
+		path = "(unknown path)"
+	}
+
+	return errors.Wrap(fmt.Errorf("%w: feature %q in local config %s", ErrLocalShellNotTrusted, name, path))
 }
 
 func expandMounts(ctx context.Context, mounts []string) ([]string, error) {

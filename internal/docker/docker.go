@@ -75,8 +75,10 @@ func withDockerClient(fn func(*client.Client) error) error {
 
 // Build builds the user layer on top of the image.
 //
-//nolint:revive // flag-parameter is the clearest API here
-func Build(ctx context.Context, image string, buildArgs []string, profile string, pull, dryRun bool) (retErr error) {
+//nolint:revive,funlen // flag-parameter is the clearest API here; trustLocalShell adds one parameter
+func Build(
+	ctx context.Context, image string, buildArgs []string, profile string, pull, dryRun, trustLocalShell bool,
+) (retErr error) {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
@@ -99,7 +101,7 @@ func Build(ctx context.Context, image string, buildArgs []string, profile string
 		activeProfile = profile
 	}
 
-	resolved, err := conf.ResolveProfile(ctx, activeProfile)
+	resolved, err := conf.ResolveProfile(ctx, activeProfile, trustLocalShell)
 	if err != nil {
 		return errors.Wrap(err)
 	}
@@ -181,7 +183,9 @@ func tagImage(ctx context.Context, cli *client.Client, from, to string) error {
 // Run runs the user layer on top of the image. Builds it if it doesn't exist.
 //
 //nolint:revive,gocognit,funlen // flag-parameter is clearest; local-config merging adds branching/length
-func Run(ctx context.Context, image string, runArgs []string, profile string, features []string, dryRun bool) error {
+func Run(
+	ctx context.Context, image string, runArgs []string, profile string, features []string, dryRun, trustLocalShell bool,
+) error {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
@@ -207,14 +211,14 @@ func Run(ctx context.Context, image string, runArgs []string, profile string, fe
 
 	warnLocalProvenance(conf, prov, activeProfile, profile != "")
 
-	resolved, err := conf.ResolveProfileNoArgs(ctx, activeProfile)
+	resolved, err := conf.ResolveProfileNoArgs(ctx, activeProfile, trustLocalShell)
 	if err != nil {
 		return errors.Wrap(err)
 	}
 
 	// Apply any feature-level Run configuration from -f flags
 	for _, featureName := range features {
-		args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(ctx, featureName)
+		args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(ctx, featureName, trustLocalShell)
 		if err != nil {
 			return errors.Wrap(err)
 		}
@@ -253,7 +257,7 @@ func Run(ctx context.Context, image string, runArgs []string, profile string, fe
 		if !exists {
 			logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
 
-			if err = Build(ctx, image, nil, profile, false, false); err != nil {
+			if err = Build(ctx, image, nil, profile, false, false, trustLocalShell); err != nil {
 				return errors.Wrap(err)
 			}
 		}

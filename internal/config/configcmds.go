@@ -81,7 +81,7 @@ func ShowResolved(ctx context.Context, cfg *Config) (string, error) {
 	var sb strings.Builder
 
 	for _, name := range names {
-		resolved, err := cfg.ResolveProfile(ctx, name)
+		resolved, err := cfg.ResolveProfile(ctx, name, false)
 		if err != nil {
 			return "", err
 		}
