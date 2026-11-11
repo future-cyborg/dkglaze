@@ -6,11 +6,9 @@ import (
 	goerrors "errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"text/template"
 
 	"github.com/containerd/errdefs"
@@ -53,32 +51,12 @@ type templateBuild struct {
 	dryRun    bool
 }
 
-func newDockerClient() (*client.Client, error) {
-	cli, err := client.New(client.FromEnv)
-	if err != nil {
-		return nil, errors.Wrap(err)
-	}
-
-	return cli, nil
-}
-
-func withDockerClient(fn func(*client.Client) error) error {
-	cli, err := newDockerClient()
-	if err != nil {
-		return err
-	}
-
-	defer func() { _ = cli.Close() }()
-
-	return fn(cli)
-}
-
 // Build builds the user layer on top of the image.
 //
-//nolint:revive,funlen // flag-parameter is the clearest API here; trustLocalShell adds one parameter
+//nolint:revive,gocognit // flag-parameter is the clearest API here; trustLocalShell adds one parameter
 func Build(
 	ctx context.Context, image string, buildArgs []string, profile string, pull, dryRun, trustLocalShell bool,
-) (retErr error) {
+) error {
 	if err := validateImageRef(image); err != nil {
 		return err
 	}
@@ -110,44 +88,39 @@ func Build(
 		return errors.Wrap(errNoTemplates)
 	}
 
-	cli, err := newDockerClient()
-	if err != nil {
-		return errors.Wrap(err)
-	}
+	return withDeps(func(d *deps) (retErr error) {
+		if pull {
+			if err := pullImage(ctx, d, image); err != nil {
+				return err
+			}
+		}
 
-	defer func() { _ = cli.Close() }()
+		finalTag, intermediateTags, err := buildTemplates(ctx, d, resolved, image, buildArgs, dryRun)
+		// Intermediate tags are temporary stepping-stone images created during the
+		// build pipeline. They are safe to remove on both success and failure: on
+		// success the final image has already been retagged, and on failure the
+		// partial intermediates are no longer needed.
+		defer func() {
+			if cleanupErr := cleanupTags(ctx, d.images, intermediateTags); cleanupErr != nil {
+				retErr = errors.Join(retErr, cleanupErr)
+			}
+		}()
 
-	if pull {
-		if err := pullImage(ctx, image); err != nil {
+		if err != nil {
 			return err
 		}
-	}
 
-	finalTag, intermediateTags, err := buildTemplates(ctx, resolved, image, buildArgs, dryRun)
-	// Intermediate tags are temporary stepping-stone images created during the
-	// build pipeline. They are safe to remove on both success and failure: on
-	// success the final image has already been retagged, and on failure the
-	// partial intermediates are no longer needed.
-	defer func() {
-		if cleanupErr := cleanupTags(ctx, cli, intermediateTags); cleanupErr != nil {
-			retErr = errors.Join(retErr, cleanupErr)
+		if dryRun {
+			return nil
 		}
-	}()
 
-	if err != nil {
-		return err
-	}
-
-	if dryRun {
-		return nil
-	}
-
-	return tagImage(ctx, cli, finalTag, newImageName(image, resolved.Suffix))
+		return tagImage(ctx, d.images, finalTag, newImageName(image, resolved.Suffix))
+	})
 }
 
 //nolint:revive // argument-limit: dryRun is a necessary addition to this internal function
 func buildTemplates(
-	ctx context.Context, resolved *config.ResolvedConfig, image string, buildArgs []string, dryRun bool,
+	ctx context.Context, d *deps, resolved *config.ResolvedConfig, image string, buildArgs []string, dryRun bool,
 ) (finalTag string, intermediateTags []string, err error) {
 	fromTag := image
 
@@ -160,7 +133,7 @@ func buildTemplates(
 			buildArgs: buildArgs, dryRun: dryRun,
 		}
 
-		if err := buildTemplate(ctx, t); err != nil {
+		if err := buildTemplate(ctx, d, t); err != nil {
 			return "", intermediateTags, errors.Wrap(err)
 		}
 
@@ -171,8 +144,8 @@ func buildTemplates(
 	return fromTag, intermediateTags, nil
 }
 
-func tagImage(ctx context.Context, cli *client.Client, from, to string) error {
-	_, err := cli.ImageTag(ctx, client.ImageTagOptions{
+func tagImage(ctx context.Context, imgs imageClient, from, to string) error {
+	_, err := imgs.ImageTag(ctx, client.ImageTagOptions{
 		Source: from,
 		Target: to,
 	})
@@ -239,7 +212,7 @@ func Run(
 		resolved.Run.Mounts = append(resolved.Run.Mounts, mounts...)
 	}
 
-	return withDockerClient(func(cli *client.Client) error {
+	return withDeps(func(d *deps) error {
 		newImage := newImageName(image, resolved.Suffix)
 
 		command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs)
@@ -249,7 +222,7 @@ func Run(
 			return nil
 		}
 
-		exists, err := imageExists(ctx, cli, newImage)
+		exists, err := imageExists(ctx, d.images, newImage)
 		if err != nil {
 			return errors.Wrap(err)
 		}
@@ -262,38 +235,23 @@ func Run(
 			}
 		}
 
-		path, err := exec.LookPath(command[0])
-		if err != nil {
-			return errors.Wrap(err)
-		}
-
-		return errors.Wrap(syscall.Exec(path, command, os.Environ())) //nolint:gosec // trusted config
+		return errors.Wrap(d.execCmd(command))
 	})
 }
 
-func execCommand(ctx context.Context, command []string) error {
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // trusted config
-	cmd.Env = os.Environ()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	return errors.Wrap(cmd.Run())
-}
-
-func pullImage(ctx context.Context, image string) error {
+func pullImage(ctx context.Context, d *deps, image string) error {
 	command := []string{dockerCmd, "pull", image}
 	logger.PrintColorF(logger.Cyan, "Pulling '%s'", image)
 
-	return execCommand(ctx, command)
+	return errors.Wrap(d.runCmd(ctx, command))
 }
 
 // Clean removes all images made by this program.
 //
 //nolint:revive // flag-parameter is the clearest API here
 func Clean(ctx context.Context, dryRun bool) error {
-	return withDockerClient(func(cli *client.Client) error {
-		imageItems, err := listDkglazeImages(ctx, cli)
+	return withDeps(func(d *deps) error {
+		imageItems, err := listDkglazeImages(ctx, d.images)
 		if err != nil {
 			return err
 		}
@@ -307,7 +265,7 @@ func Clean(ctx context.Context, dryRun bool) error {
 		var allErr error
 
 		for item := range imageItems {
-			err = cleanImage(ctx, cli, &imageItems[item], dryRun)
+			err = cleanImage(ctx, d.images, &imageItems[item], dryRun)
 			if err != nil {
 				allErr = errors.Join(allErr, err)
 			}
@@ -321,9 +279,9 @@ func Clean(ctx context.Context, dryRun bool) error {
 	})
 }
 
-func listDkglazeImages(ctx context.Context, cli *client.Client) ([]imageapi.Summary, error) {
+func listDkglazeImages(ctx context.Context, imgs imageClient) ([]imageapi.Summary, error) {
 	f := client.Filters{"label": {"com.dkglaze": true}}
-	imageList, err := cli.ImageList(ctx, client.ImageListOptions{Filters: f})
+	imageList, err := imgs.ImageList(ctx, client.ImageListOptions{Filters: f})
 	if err != nil {
 		return nil, errors.Wrap(err)
 	}
@@ -335,8 +293,8 @@ func listDkglazeImages(ctx context.Context, cli *client.Client) ([]imageapi.Summ
 func ListNonDkglazeImages(ctx context.Context) ([]string, error) {
 	var tags []string
 
-	err := withDockerClient(func(cli *client.Client) error {
-		imageList, err := cli.ImageList(ctx, client.ImageListOptions{})
+	err := withDeps(func(d *deps) error {
+		imageList, err := d.images.ImageList(ctx, client.ImageListOptions{})
 		if err != nil {
 			return errors.Wrap(err)
 		}
@@ -365,8 +323,8 @@ func ListNonDkglazeImages(ctx context.Context) ([]string, error) {
 
 // List prints all images managed by dkglaze.
 func List(ctx context.Context) error {
-	return withDockerClient(func(cli *client.Client) error {
-		images, err := listDkglazeImages(ctx, cli)
+	return withDeps(func(d *deps) error {
+		images, err := listDkglazeImages(ctx, d.images)
 		if err != nil {
 			return err
 		}
@@ -386,9 +344,9 @@ func List(ctx context.Context) error {
 }
 
 //nolint:revive // flag-parameter is the clearest API here
-func cleanImage(ctx context.Context, cli *client.Client, image *imageapi.Summary, dryRun bool) error {
+func cleanImage(ctx context.Context, imgs imageClient, image *imageapi.Summary, dryRun bool) error {
 	if !dryRun {
-		_, err := cli.ImageRemove(ctx, image.ID, client.ImageRemoveOptions{})
+		_, err := imgs.ImageRemove(ctx, image.ID, client.ImageRemoveOptions{})
 		if err != nil {
 			return errors.Wrap(err)
 		}
@@ -403,7 +361,7 @@ func cleanImage(ctx context.Context, cli *client.Client, image *imageapi.Summary
 	return nil
 }
 
-func buildTemplate(ctx context.Context, t *templateBuild) error {
+func buildTemplate(ctx context.Context, d *deps, t *templateBuild) error {
 	placeholderOrReal := "<" + t.name + ".dockerfile>"
 
 	command := []string{
@@ -435,12 +393,7 @@ func buildTemplate(ctx context.Context, t *templateBuild) error {
 
 	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
 
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...) //nolint:gosec // trusted config
-
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return errors.Wrap(cmd.Run())
+	return errors.Wrap(d.runCmd(ctx, command))
 }
 
 func writeTemplateFile(templateName, fromTag string) (tempFile, contextDir string, err error) {
@@ -500,13 +453,13 @@ func executeTemplate(tmpl *template.Template, templateName, fromTag string) (str
 	return tmpFile.Name(), nil
 }
 
-func cleanupTags(ctx context.Context, cli *client.Client, tags []string) error {
+func cleanupTags(ctx context.Context, imgs imageClient, tags []string) error {
 	var allErr error
 
 	for _, tag := range tags {
 		logger.PrintColorF(logger.Yellow, "Removing image %s", tag)
 
-		_, err := cli.ImageRemove(ctx, tag, client.ImageRemoveOptions{})
+		_, err := imgs.ImageRemove(ctx, tag, client.ImageRemoveOptions{})
 		if err != nil {
 			logger.PrintColorFErr(logger.Red, "Failed to remove image %s: %v", tag, err)
 			allErr = errors.Join(allErr, errors.Wrap(err))
@@ -587,8 +540,8 @@ func mountFlagsFromResolved(resolved *config.ResolvedConfig) []string {
 	return flags
 }
 
-func imageExists(ctx context.Context, cli *client.Client, image string) (bool, error) {
-	_, err := cli.ImageInspect(ctx, image)
+func imageExists(ctx context.Context, imgs imageClient, image string) (bool, error) {
+	_, err := imgs.ImageInspect(ctx, image)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			return false, nil
