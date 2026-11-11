@@ -357,7 +357,6 @@ make unit-test/$(GO_PKG)              run unit tests on single package
 make unit-test-cover                  open coverage heatmap in browser
 make unit-test-cover/$(GO_PKG)        open coverage heatmap in browser, single package
 
-make go/generate                      apply go generators
 make go/format                        apply lint fixers
 make go/lint                          runs linters
 make go/tidy                          update go.mod from source code
