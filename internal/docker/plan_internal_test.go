@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -144,5 +145,92 @@ func TestBuildStepCommand_ExecutionUsesRealPaths(t *testing.T) {
 	// The step's own Args must not be mutated by building the argv.
 	if !slices.Equal(step.Args, []string{"--build-arg", "FOO=bar"}) {
 		t.Errorf("step.Args mutated: %q", step.Args)
+	}
+}
+
+func TestSelectProfile(t *testing.T) {
+	conf := &config.Config{Defaults: config.Defaults{Profile: "default"}}
+
+	cases := []struct {
+		name      string
+		requested string
+		want      profileSelection
+	}{
+		{name: "defaults when not requested", requested: "", want: profileSelection{Active: "default"}},
+		{
+			name: "requested overrides default", requested: "other",
+			want: profileSelection{Requested: "other", Active: "other"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := selectProfile(conf, tc.requested)
+			if got != tc.want {
+				t.Errorf("got %+v, want %+v", got, tc.want)
+			}
+
+			if got.explicit() != (tc.requested != "") {
+				t.Errorf("explicit() = %t, want %t", got.explicit(), tc.requested != "")
+			}
+		})
+	}
+}
+
+func TestPlanRun(t *testing.T) {
+	resolved := &config.ResolvedConfig{
+		Suffix: "dev",
+		Run:    config.Run{Args: []string{"--rm"}, Mounts: []string{"/a:/a"}},
+	}
+
+	got := planRun("ubuntu:22.04", resolved, []string{"-it"})
+
+	if got.Image != "ubuntu-dev:22.04" {
+		t.Errorf("image: got %q, want %q", got.Image, "ubuntu-dev:22.04")
+	}
+
+	want := []string{"docker", "run", "--rm", "--volume", "/a:/a", "-it", "ubuntu-dev:22.04"}
+	if !slices.Equal(got.Command, want) {
+		t.Errorf("command:\n got:  %q\n want: %q", got.Command, want)
+	}
+}
+
+func TestApplyRunFeatures_CollectsArgsAndWarnings(t *testing.T) {
+	conf := &config.Config{
+		Features: map[string]config.Feature{
+			"withbuild": {
+				Build: config.Build{Templates: []string{"a"}},
+				Run:   config.Run{Args: []string{"-x"}, Mounts: []string{"/m:/m"}},
+			},
+		},
+	}
+	prov := &config.LocalProvenance{Features: map[string]bool{"withbuild": true}}
+
+	extra, warnings, err := applyRunFeatures(context.Background(), conf, prov, &RunOptions{
+		Features: []string{"withbuild"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !slices.Equal(extra.Args, []string{"-x"}) || !slices.Equal(extra.Mounts, []string{"/m:/m"}) {
+		t.Errorf("extra: got %+v", extra)
+	}
+
+	if len(warnings) != 2 ||
+		!strings.Contains(warnings[0], "has build config") ||
+		!strings.Contains(warnings[1], `"withbuild" from local config`) {
+		t.Errorf("warnings: got %q", warnings)
+	}
+}
+
+func TestApplyRunFeatures_UnknownFeatureIsError(t *testing.T) {
+	conf := &config.Config{}
+
+	_, _, err := applyRunFeatures(context.Background(), conf, &config.LocalProvenance{}, &RunOptions{
+		Features: []string{"missing"},
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown feature, got nil")
 	}
 }

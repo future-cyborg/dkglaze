@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/future-cyborg/dkglaze/internal/config"
@@ -79,4 +80,81 @@ func (s *buildStep) command(dockerfile, contextDir string) []string {
 // Dockerfile and context, for printing a dry run.
 func (s *buildStep) displayCommand() []string {
 	return s.command("<"+s.Template+".dockerfile>", "<context>")
+}
+
+// runPlan is the pure description of a docker run invocation.
+type runPlan struct {
+	// Image is the image the container runs, with the profile suffix applied.
+	Image string
+	// Command is the full docker run argv.
+	Command []string
+}
+
+// planRun builds the docker run argv. The resolved config supplies the run
+// args and mounts, and runArgs are passed straight through to docker run.
+func planRun(image string, resolved *config.ResolvedConfig, runArgs []string) runPlan {
+	newImage := newImageName(image, resolved.Suffix)
+
+	return runPlan{
+		Image:   newImage,
+		Command: runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs),
+	}
+}
+
+// profileSelection records which profile was requested and which one ends up active
+// once the configured default is applied.
+type profileSelection struct {
+	// Requested is the value of -p, or empty when -p was not given.
+	Requested string
+	// Active is the profile that is actually used.
+	Active string
+}
+
+// explicit reports whether the profile was chosen with -p rather than the default.
+func (s profileSelection) explicit() bool {
+	return s.Requested != ""
+}
+
+// selectProfile chooses the active profile: the requested one if given,
+// otherwise the configured default.
+func selectProfile(conf *config.Config, requested string) profileSelection {
+	active := conf.Defaults.Profile
+	if requested != "" {
+		active = requested
+	}
+
+	return profileSelection{Requested: requested, Active: active}
+}
+
+// localProvenanceWarnings describes every part of the selected profile
+// selection that came from the project-local config file, so a run never
+// silently depends on local-sourced configuration. localPath is the path shown
+// to the user.
+func localProvenanceWarnings(
+	conf *config.Config, prov *config.LocalProvenance, sel profileSelection, localPath string,
+) []string {
+	var warnings []string
+
+	if !sel.explicit() && prov.DefaultFromLocal {
+		warnings = append(warnings,
+			fmt.Sprintf("profile %q selected by defaults.profile in local config %s", sel.Active, localPath))
+	}
+
+	if chain, err := conf.ProfileChain(sel.Active); err == nil {
+		for _, name := range chain {
+			if prov.Profiles[name] {
+				warnings = append(warnings, fmt.Sprintf("using profile %q from local config %s", name, localPath))
+			}
+		}
+	}
+
+	if featureNames, err := conf.ResolveFeatureNames(sel.Active); err == nil {
+		for _, featureName := range featureNames {
+			if prov.Features[featureName] {
+				warnings = append(warnings, fmt.Sprintf("feature %q from local config %s", featureName, localPath))
+			}
+		}
+	}
+
+	return warnings
 }

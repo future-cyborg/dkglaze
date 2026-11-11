@@ -26,8 +26,13 @@ func ExportedValidateImageRef(image string) error {
 	return validateImageRef(image)
 }
 
-func ExportedWarnLocalProvenance(
-	conf *config.Config, prov *config.LocalProvenance, profileName string, explicitProfile bool,
-) {
-	warnLocalProvenance(conf, prov, profileName, explicitProfile)
+func ExportedLocalProvenanceWarnings(
+	conf *config.Config, prov *config.LocalProvenance, profileName string, explicitProfile bool, localPath string,
+) []string {
+	sel := profileSelection{Active: profileName}
+	if explicitProfile {
+		sel.Requested = profileName
+	}
+
+	return localProvenanceWarnings(conf, prov, sel, localPath)
 }

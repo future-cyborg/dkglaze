@@ -59,32 +59,19 @@ func Build(ctx context.Context, opts *BuildOptions) error {
 }
 
 // buildWith is the executor behind Build.
-//
-//nolint:revive // resolves config then delegates to plan/execute; split further in later commits
 func buildWith(ctx context.Context, d *deps, opts *BuildOptions) error {
 	if err := validateImageRef(opts.Image); err != nil {
 		return err
 	}
 
-	conf, err := config.LoadConfig()
+	conf, _, err := loadMergedConfig()
 	if err != nil {
-		return errors.Wrap(err)
+		return err
 	}
 
-	local, err := config.LoadLocalConfig()
-	if err != nil {
-		return errors.Wrap(err)
-	}
-	if _, err := conf.MergeLocal(local); err != nil {
-		return errors.Wrap(err)
-	}
+	sel := selectProfile(conf, opts.Profile)
 
-	activeProfile := conf.Defaults.Profile
-	if opts.Profile != "" {
-		activeProfile = opts.Profile
-	}
-
-	resolved, err := conf.ResolveProfile(ctx, activeProfile, opts.TrustLocalShell)
+	resolved, err := conf.ResolveProfile(ctx, sel.Active, opts.TrustLocalShell)
 	if err != nil {
 		return errors.Wrap(err)
 	}
@@ -175,88 +162,153 @@ func Run(ctx context.Context, opts *RunOptions) error {
 }
 
 // runWith is the executor behind Run.
-//
-//nolint:revive,funlen,gocognit // mirrors the pre-split Run body; split up in later commits
 func runWith(ctx context.Context, d *deps, opts *RunOptions) error {
 	if err := validateImageRef(opts.Image); err != nil {
 		return err
 	}
 
-	conf, err := config.LoadConfig()
+	conf, prov, err := loadMergedConfig()
 	if err != nil {
-		return errors.Wrap(err)
+		return err
 	}
 
-	local, err := config.LoadLocalConfig()
+	resolved, err := resolveRun(ctx, conf, prov, opts)
 	if err != nil {
-		return errors.Wrap(err)
-	}
-	prov, err := conf.MergeLocal(local)
-	if err != nil {
-		return errors.Wrap(err)
+		return err
 	}
 
-	activeProfile := conf.Defaults.Profile
-	if opts.Profile != "" {
-		activeProfile = opts.Profile
-	}
-
-	warnLocalProvenance(conf, prov, activeProfile, opts.Profile != "")
-
-	resolved, err := conf.ResolveProfileNoArgs(ctx, activeProfile, opts.TrustLocalShell)
-	if err != nil {
-		return errors.Wrap(err)
-	}
-
-	// Apply any feature-level Run configuration from -f flags
-	for _, featureName := range opts.Features {
-		args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(ctx, featureName, opts.TrustLocalShell)
-		if err != nil {
-			return errors.Wrap(err)
-		}
-
-		if hasBuild {
-			logger.PrintColorF(logger.Yellow, "feature %q has build config, which is ignored by -f on run", featureName)
-		}
-
-		if prov.Features[featureName] {
-			path, _, err := config.GetLocalConfigPath()
-			if err != nil {
-				path = localConfigFallbackLabel
-			}
-			logger.PrintColorF(logger.Yellow, "feature %q from local config %s", featureName, path)
-		}
-
-		resolved.Run.Args = append(resolved.Run.Args, args...)
-		resolved.Run.Mounts = append(resolved.Run.Mounts, mounts...)
-	}
-
-	newImage := newImageName(opts.Image, resolved.Suffix)
-
-	command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), opts.RunArgs)
-	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
+	plan := planRun(opts.Image, resolved, opts.RunArgs)
+	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(plan.Command, " "))
 
 	if opts.DryRun {
 		return nil
 	}
 
+	if err := ensureImage(ctx, d, opts, plan.Image); err != nil {
+		return err
+	}
+
+	// Exec replaces the process on success, so this must stay the final statement.
+	return errors.Wrap(d.execCmd(plan.Command))
+}
+
+// resolveRun resolves the selected profile and the -f features into the run
+// config, printing the local-provenance warnings along the way.
+func resolveRun(
+	ctx context.Context, conf *config.Config, prov *config.LocalProvenance, opts *RunOptions,
+) (*config.ResolvedConfig, error) {
+	sel := selectProfile(conf, opts.Profile)
+	printWarnings(localProvenanceWarnings(conf, prov, sel, localConfigLabel()))
+
+	resolved, err := conf.ResolveProfileNoArgs(ctx, sel.Active, opts.TrustLocalShell)
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	extra, featureWarnings, err := applyRunFeatures(ctx, conf, prov, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	printWarnings(featureWarnings)
+
+	resolved.Run.Args = append(resolved.Run.Args, extra.Args...)
+	resolved.Run.Mounts = append(resolved.Run.Mounts, extra.Mounts...)
+
+	return resolved, nil
+}
+
+// ensureImage builds the run image from opts when newImage is not present on the daemon.
+func ensureImage(ctx context.Context, d *deps, opts *RunOptions, newImage string) error {
 	exists, err := imageExists(ctx, d.images, newImage)
 	if err != nil {
 		return errors.Wrap(err)
 	}
 
-	if !exists {
-		logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
-
-		err = buildWith(ctx, d, &BuildOptions{
-			Image: opts.Image, Profile: opts.Profile, TrustLocalShell: opts.TrustLocalShell,
-		})
-		if err != nil {
-			return errors.Wrap(err)
-		}
+	if exists {
+		return nil
 	}
 
-	return errors.Wrap(d.execCmd(command))
+	logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
+
+	// An unset profile falls back to the default inside buildWith, matching the run selection.
+	return errors.Wrap(buildWith(ctx, d, &BuildOptions{
+		Image: opts.Image, Profile: opts.Profile, TrustLocalShell: opts.TrustLocalShell,
+	}))
+}
+
+// printWarnings prints each warning in yellow.
+func printWarnings(warnings []string) {
+	for _, msg := range warnings {
+		logger.PrintColor(logger.Yellow, msg)
+	}
+}
+
+// loadMergedConfig loads the global config and merges the project-local config
+// into it, returning the merged config and which names came from the local file.
+func loadMergedConfig() (*config.Config, *config.LocalProvenance, error) {
+	conf, err := config.LoadConfig()
+	if err != nil {
+		return nil, nil, errors.Wrap(err)
+	}
+
+	local, err := config.LoadLocalConfig()
+	if err != nil {
+		return nil, nil, errors.Wrap(err)
+	}
+
+	prov, err := conf.MergeLocal(local)
+	if err != nil {
+		return nil, nil, errors.Wrap(err)
+	}
+
+	return conf, prov, nil
+}
+
+// localConfigLabel returns the local config path for use in messages, or a
+// fallback label when the path cannot be determined.
+func localConfigLabel() string {
+	path, _, err := config.GetLocalConfigPath()
+	if err != nil {
+		return localConfigFallbackLabel
+	}
+
+	return path
+}
+
+// applyRunFeatures resolves the -f features into the run args and mounts they
+// contribute. Build content on a feature is ignored. The returned warnings are
+// for the caller to print.
+func applyRunFeatures(
+	ctx context.Context, conf *config.Config, prov *config.LocalProvenance, opts *RunOptions,
+) (config.Run, []string, error) {
+	var (
+		extra    config.Run
+		warnings []string
+		label    = localConfigLabel()
+	)
+
+	for _, featureName := range opts.Features {
+		args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(ctx, featureName, opts.TrustLocalShell)
+		if err != nil {
+			return config.Run{}, nil, errors.Wrap(err)
+		}
+
+		if hasBuild {
+			msg := fmt.Sprintf("feature %q has build config, which is ignored by -f on run", featureName)
+			warnings = append(warnings, msg)
+		}
+
+		if prov.Features[featureName] {
+			msg := fmt.Sprintf("feature %q from local config %s", featureName, label)
+			warnings = append(warnings, msg)
+		}
+
+		extra.Args = append(extra.Args, args...)
+		extra.Mounts = append(extra.Mounts, mounts...)
+	}
+
+	return extra, warnings, nil
 }
 
 func pullImage(ctx context.Context, d *deps, image string) error {
@@ -504,41 +556,6 @@ func newImageName(image, imageTemplate string) string {
 	}
 
 	return fmt.Sprintf("%s-%s:%s", image[:lastColon], imageTemplate, image[lastColon+1:])
-}
-
-// warnLocalProvenance prints a loud, non-blocking warning whenever the
-// resolved profile, any profile it extends, any of their features, or the
-// default-profile selection itself originated from the local project-tree
-// config file, so a run never silently depends on local-sourced
-// configuration. explicitProfile is true when the caller passed -p, in which
-// case the local defaults.profile (if any) played no part in the selection.
-//
-//nolint:revive // flag-parameter is the clearest API here
-func warnLocalProvenance(conf *config.Config, prov *config.LocalProvenance, profileName string, explicitProfile bool) {
-	path, _, err := config.GetLocalConfigPath()
-	if err != nil {
-		path = localConfigFallbackLabel
-	}
-
-	if !explicitProfile && prov.DefaultFromLocal {
-		logger.PrintColorF(logger.Yellow, "profile %q selected by defaults.profile in local config %s", profileName, path)
-	}
-
-	if chain, err := conf.ProfileChain(profileName); err == nil {
-		for _, name := range chain {
-			if prov.Profiles[name] {
-				logger.PrintColorF(logger.Yellow, "using profile %q from local config %s", name, path)
-			}
-		}
-	}
-
-	if featureNames, err := conf.ResolveFeatureNames(profileName); err == nil {
-		for _, featureName := range featureNames {
-			if prov.Features[featureName] {
-				logger.PrintColorF(logger.Yellow, "feature %q from local config %s", featureName, path)
-			}
-		}
-	}
 }
 
 func buildArgsFromResolved(resolved *config.ResolvedConfig) []string {

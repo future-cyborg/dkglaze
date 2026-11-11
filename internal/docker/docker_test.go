@@ -369,8 +369,25 @@ func TestMountFlagsFromResolved(t *testing.T) {
 	})
 }
 
+const testLocalPath = "/project/.dkglaze.yml"
+
+// assertWarnings checks that got has exactly one entry per wanted substring, in order.
+func assertWarnings(t *testing.T, got []string, wantSubstrings ...string) {
+	t.Helper()
+
+	if len(got) != len(wantSubstrings) {
+		t.Fatalf("want %d warning(s) %q, got %d: %q", len(wantSubstrings), wantSubstrings, len(got), got)
+	}
+
+	for i, sub := range wantSubstrings {
+		if !strings.Contains(got[i], sub) {
+			t.Errorf("warning %d: want it to contain %q, got %q", i, sub, got[i])
+		}
+	}
+}
+
 func TestWarnLocalProvenance_NoWarningWhenGlobal(t *testing.T) {
-	// Test that no warning is produced when profile/features come from global config
+	// Nothing came from the local config, so there is nothing to warn about.
 	conf := &config.Config{
 		Features: map[string]config.Feature{
 			"base": {Run: config.Run{Args: []string{"--rm"}}},
@@ -380,18 +397,16 @@ func TestWarnLocalProvenance_NoWarningWhenGlobal(t *testing.T) {
 		},
 	}
 
-	// Empty provenance — nothing came from local
 	prov := &config.LocalProvenance{
 		Features: map[string]bool{},
 		Profiles: map[string]bool{},
 	}
 
-	// This should not panic and should not produce warnings
-	docker.ExportedWarnLocalProvenance(conf, prov, "default", true)
+	got := docker.ExportedLocalProvenanceWarnings(conf, prov, "default", true, testLocalPath)
+	assertWarnings(t, got)
 }
 
 func TestWarnLocalProvenance_WarnsWhenProfileFromLocal(t *testing.T) {
-	// Test that warning is produced when profile comes from local config
 	conf := &config.Config{
 		Features: map[string]config.Feature{
 			"base": {Run: config.Run{Args: []string{"--rm"}}},
@@ -406,12 +421,11 @@ func TestWarnLocalProvenance_WarnsWhenProfileFromLocal(t *testing.T) {
 		Profiles: map[string]bool{"local-profile": true},
 	}
 
-	// This should not panic
-	docker.ExportedWarnLocalProvenance(conf, prov, "local-profile", true)
+	got := docker.ExportedLocalProvenanceWarnings(conf, prov, "local-profile", true, testLocalPath)
+	assertWarnings(t, got, `using profile "local-profile" from local config `+testLocalPath)
 }
 
 func TestWarnLocalProvenance_WarnsWhenFeatureFromLocal(t *testing.T) {
-	// Test that warning is produced when a feature in the profile comes from local
 	conf := &config.Config{
 		Features: map[string]config.Feature{
 			"base":          {Run: config.Run{Args: []string{"--rm"}}},
@@ -427,12 +441,12 @@ func TestWarnLocalProvenance_WarnsWhenFeatureFromLocal(t *testing.T) {
 		Profiles: map[string]bool{},
 	}
 
-	// This should not panic
-	docker.ExportedWarnLocalProvenance(conf, prov, "default", true)
+	got := docker.ExportedLocalProvenanceWarnings(conf, prov, "default", true, testLocalPath)
+	assertWarnings(t, got, `feature "local-feature" from local config `+testLocalPath)
 }
 
 func TestWarnLocalProvenance_IgnoresUnknownProfile(t *testing.T) {
-	// Test that when profile name doesn't exist in conf, function returns gracefully
+	// An unknown profile has no chain or features to inspect, so the local flag is unreachable.
 	conf := &config.Config{
 		Features: map[string]config.Feature{
 			"base": {Run: config.Run{Args: []string{"--rm"}}},
@@ -447,8 +461,8 @@ func TestWarnLocalProvenance_IgnoresUnknownProfile(t *testing.T) {
 		Profiles: map[string]bool{"nonexistent": true},
 	}
 
-	// This should not panic even though "nonexistent" is not in conf
-	docker.ExportedWarnLocalProvenance(conf, prov, "nonexistent", true)
+	got := docker.ExportedLocalProvenanceWarnings(conf, prov, "nonexistent", true, testLocalPath)
+	assertWarnings(t, got)
 }
 
 func TestWarnLocalProvenance_WarnsWhenDefaultFromLocalAndProfileNotExplicit(t *testing.T) {
@@ -468,9 +482,9 @@ func TestWarnLocalProvenance_WarnsWhenDefaultFromLocalAndProfileNotExplicit(t *t
 		DefaultFromLocal: true,
 	}
 
-	// This should not panic; the default-selection warning fires since the
-	// profile wasn't explicitly passed via -p.
-	docker.ExportedWarnLocalProvenance(conf, prov, "default", false)
+	// The default-selection warning fires because the profile was not passed via -p.
+	got := docker.ExportedLocalProvenanceWarnings(conf, prov, "default", false, testLocalPath)
+	assertWarnings(t, got, `profile "default" selected by defaults.profile in local config `+testLocalPath)
 }
 
 func TestWarnLocalProvenance_NoDefaultWarningWhenProfileExplicit(t *testing.T) {
@@ -489,7 +503,7 @@ func TestWarnLocalProvenance_NoDefaultWarningWhenProfileExplicit(t *testing.T) {
 		DefaultFromLocal: true,
 	}
 
-	// This should not panic; the default-selection warning does not apply
-	// since the profile was explicitly passed via -p.
-	docker.ExportedWarnLocalProvenance(conf, prov, "default", true)
+	// The default-selection warning does not apply since the profile was passed via -p.
+	got := docker.ExportedLocalProvenanceWarnings(conf, prov, "default", true, testLocalPath)
+	assertWarnings(t, got)
 }
