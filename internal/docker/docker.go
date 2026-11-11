@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"text/template"
 
@@ -52,15 +51,6 @@ func validateImageRef(image string) error {
 	return nil
 }
 
-type templateBuild struct {
-	resolved  *config.ResolvedConfig
-	name      string
-	fromTag   string
-	resultTag string
-	buildArgs []string
-	dryRun    bool
-}
-
 // Build builds the user layer on top of the image.
 func Build(ctx context.Context, opts *BuildOptions) error {
 	return withDeps(func(d *deps) error {
@@ -70,8 +60,8 @@ func Build(ctx context.Context, opts *BuildOptions) error {
 
 // buildWith is the executor behind Build.
 //
-//nolint:revive // mirrors the pre-split Build body; split up in later commits
-func buildWith(ctx context.Context, d *deps, opts *BuildOptions) (retErr error) {
+//nolint:revive // resolves config then delegates to plan/execute; split further in later commits
+func buildWith(ctx context.Context, d *deps, opts *BuildOptions) error {
 	if err := validateImageRef(opts.Image); err != nil {
 		return err
 	}
@@ -99,8 +89,9 @@ func buildWith(ctx context.Context, d *deps, opts *BuildOptions) (retErr error) 
 		return errors.Wrap(err)
 	}
 
-	if len(resolved.Build.Templates) == 0 {
-		return errors.Wrap(errNoTemplates)
+	plan, err := planBuild(opts.Image, resolved, opts.BuildArgs)
+	if err != nil {
+		return err
 	}
 
 	if opts.Pull {
@@ -109,52 +100,62 @@ func buildWith(ctx context.Context, d *deps, opts *BuildOptions) (retErr error) 
 		}
 	}
 
-	finalTag, intermediateTags, err := buildTemplates(ctx, d, resolved, opts.Image, opts.BuildArgs, opts.DryRun)
-	// Intermediate tags are temporary stepping-stone images created during the
-	// build pipeline. They are safe to remove on both success and failure: on
-	// success the final image has already been retagged, and on failure the
-	// partial intermediates are no longer needed.
+	if opts.DryRun {
+		return dryRunBuild(ctx, d, plan)
+	}
+
+	return executeBuild(ctx, d, plan)
+}
+
+// executeBuild runs each step in order and then tags the last step's result as
+// the final image. Every step that succeeded is recorded so its intermediate tag
+// is removed on both success and failure. The cleanup is deferred, so it runs
+// after the final tag has been created.
+func executeBuild(ctx context.Context, d *deps, plan *buildPlan) (retErr error) {
+	var created []string
+
 	defer func() {
-		if cleanupErr := cleanupTags(ctx, d.images, intermediateTags); cleanupErr != nil {
+		if cleanupErr := cleanupTags(ctx, d.images, created); cleanupErr != nil {
 			retErr = errors.Join(retErr, cleanupErr)
 		}
 	}()
 
-	if err != nil {
-		return err
+	for i := range plan.Steps {
+		step := &plan.Steps[i]
+
+		if err := runBuildStep(ctx, d, step); err != nil {
+			return err
+		}
+
+		created = append(created, step.ResultTag)
 	}
 
-	if opts.DryRun {
-		return nil
-	}
-
-	return tagImage(ctx, d.images, finalTag, newImageName(opts.Image, resolved.Suffix))
+	// planBuild guarantees at least one step, so created is never empty here.
+	return tagImage(ctx, d.images, created[len(created)-1], plan.FinalTag)
 }
 
-//nolint:revive // argument-limit: dryRun is a necessary addition to this internal function
-func buildTemplates(
-	ctx context.Context, d *deps, resolved *config.ResolvedConfig, image string, buildArgs []string, dryRun bool,
-) (finalTag string, intermediateTags []string, err error) {
-	fromTag := image
+// dryRunBuild prints each step's command without running anything.
+//
+// It still records the intermediate tags for cleanup, matching the behavior
+// before the dry-run split. Those images were never created, which the
+// dry-run fix commit will correct.
+func dryRunBuild(ctx context.Context, d *deps, plan *buildPlan) (retErr error) {
+	var created []string
 
-	for i, templateName := range resolved.Build.Templates {
-		resultTag := newImageName(image, resolved.Suffix+"."+strconv.Itoa(i))
-
-		t := &templateBuild{
-			resolved: resolved, name: templateName,
-			fromTag: fromTag, resultTag: resultTag,
-			buildArgs: buildArgs, dryRun: dryRun,
+	defer func() {
+		if cleanupErr := cleanupTags(ctx, d.images, created); cleanupErr != nil {
+			retErr = errors.Join(retErr, cleanupErr)
 		}
+	}()
 
-		if err := buildTemplate(ctx, d, t); err != nil {
-			return "", intermediateTags, errors.Wrap(err)
-		}
+	for i := range plan.Steps {
+		step := &plan.Steps[i]
+		logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(step.displayCommand(), " "))
 
-		intermediateTags = append(intermediateTags, resultTag)
-		fromTag = resultTag
+		created = append(created, step.ResultTag)
 	}
 
-	return fromTag, intermediateTags, nil
+	return nil
 }
 
 func tagImage(ctx context.Context, imgs imageClient, from, to string) error {
@@ -399,36 +400,16 @@ func cleanImage(ctx context.Context, imgs imageClient, image *imageapi.Summary, 
 	return nil
 }
 
-func buildTemplate(ctx context.Context, d *deps, t *templateBuild) error {
-	placeholderOrReal := "<" + t.name + ".dockerfile>"
-
-	command := []string{
-		dockerCmd, dockerBuildCmd,
-		dockerLabelFlag, dkglazeLabel + "=true",
-		dockerTagFlag, t.resultTag,
-		dockerFileFlag, placeholderOrReal,
-	}
-
-	command = append(command, buildArgsFromResolved(t.resolved)...)
-	command = append(command, t.buildArgs...)
-
-	if t.dryRun {
-		command = append(command, "<context>")
-		logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
-
-		return nil
-	}
-
-	tmpFile, contextDir, err := writeTemplateFile(t.name, t.fromTag)
+// runBuildStep renders the step's Dockerfile to a temp file and runs docker build with it.
+func runBuildStep(ctx context.Context, d *deps, step *buildStep) error {
+	tmpFile, contextDir, err := writeTemplateFile(step.Template, step.FromTag)
 	if err != nil {
 		return errors.Wrap(err)
 	}
 
 	defer func() { _ = os.Remove(tmpFile) }()
 
-	command[7] = tmpFile
-	command = append(command, contextDir)
-
+	command := step.command(tmpFile, contextDir)
 	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
 
 	return errors.Wrap(d.runCmd(ctx, command))
