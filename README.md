@@ -350,10 +350,6 @@ make bin                              all bin/ targets
 make bin/$(PLATFORM)                  all bin/$(PLATFORM)/ targets
 make bin/$(PLATFORM)/$(BUILD)
 
-make docker                           all docker/ targets
-make docker/$(PLATFORM)               all docker/$(PLATFORM)/ targets
-make docker/$(PLATFORM)/$(BUILD)
-
 make bench-test                       run bench tests
 make bench-test/$(GO_PKG)             run bench tests on single package
 make unit-test                        run unit tests
