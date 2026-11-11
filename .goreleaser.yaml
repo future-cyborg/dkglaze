@@ -1,0 +1,53 @@
+version: 2
+
+project_name: dkglaze
+
+before:
+  hooks:
+    - go mod tidy
+    - mkdir -p completions
+    # Hooks are executed directly (not via a shell), so redirection needs sh -c.
+    - sh -c "go run ./cmd/dkglaze completion bash > completions/dkglaze.bash"
+    - sh -c "go run ./cmd/dkglaze completion zsh > completions/dkglaze.zsh"
+
+builds:
+  - id: dkglaze
+    main: ./cmd/dkglaze
+    binary: dkglaze
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # {{.Tag}} keeps the "v" prefix, matching GIT_DESCRIBE used for local builds.
+    ldflags:
+      - -s -w -X main.version={{.Tag}}
+
+archives:
+  - id: dkglaze
+    formats:
+      - tar.gz
+    name_template: "dkglaze_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - completions/dkglaze.bash
+      - completions/dkglaze.zsh
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge "
+
+# GitHub owner/name are auto-detected from the "origin" git remote.
+release:
+  prerelease: auto

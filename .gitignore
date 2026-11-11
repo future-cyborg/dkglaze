@@ -8,3 +8,5 @@ coverage.out
 *.cover.out
 .idea/
 .vscode/
+# GoReleaser output (release/snapshot, release)
+/completions/
