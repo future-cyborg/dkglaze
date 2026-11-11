@@ -40,8 +40,8 @@ COPY --from=tidy-runner /out/* /
 FROM base AS format-runner-base
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go install github.com/daixiang0/gci && \
-    go install mvdan.cc/gofumpt
+    go install github.com/daixiang0/gci@v0.14.0 && \
+    go install mvdan.cc/gofumpt@v0.9.2
 
 FROM format-runner-base AS format-runner
 ARG REPO_NAME
