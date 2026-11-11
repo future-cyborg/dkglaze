@@ -10,7 +10,13 @@ import (
 	"github.com/future-cyborg/dkglaze/internal/errors"
 )
 
-const posComplImages = "images"
+const (
+	posComplImages = "images"
+	shellBash      = "bash"
+	shellZsh       = "zsh"
+	complProfiles  = "profiles"
+	complFeatures  = "features"
+)
 
 //go:embed bash.tmpl
 var bashTmpl string
@@ -176,9 +182,9 @@ func generateCompletion(shell string, app *kong.Application) (string, error) {
 	var tmplStr string
 
 	switch shell {
-	case "bash":
+	case shellBash:
 		tmplStr = bashTmpl
-	case "zsh":
+	case shellZsh:
 		tmplStr = zshTmpl
 	default:
 		return "", nil
@@ -208,8 +214,8 @@ func generateCompletion(shell string, app *kong.Application) (string, error) {
 		FnName:              fnName,
 		Cmds:                cmds,
 		ValueFlagPatterns:   collectFlagPatterns(cmds, func(f flagMeta) bool { return f.Completion == "" }),
-		ProfileFlagPatterns: collectFlagPatterns(cmds, func(f flagMeta) bool { return f.Completion == "profiles" }),
-		FeatureFlagPatterns: collectFlagPatterns(cmds, func(f flagMeta) bool { return f.Completion == "features" }),
+		ProfileFlagPatterns: collectFlagPatterns(cmds, func(f flagMeta) bool { return f.Completion == complProfiles }),
+		FeatureFlagPatterns: collectFlagPatterns(cmds, func(f flagMeta) bool { return f.Completion == complFeatures }),
 	}
 
 	t, err := template.New(shell).Funcs(fnMap).Parse(tmplStr)
