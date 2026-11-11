@@ -27,6 +27,8 @@ THIS_FILE := $(lastword $(MAKEFILE_LIST))
 #
 #   make tag/bump-minor-and-push          tag minor version and push
 #   make tag/bump-patch-and-push          tag patch version and push
+#
+#   make release/snapshot                 dry-run GoReleaser (snapshot, no publish)
 
 SHELL              = /bin/bash -o pipefail
 
@@ -47,6 +49,7 @@ SEMVER_PATCH_BUMP  := $(shell echo '$(GIT_DESCRIBE)' | sed 's/-.*$$//;s/[.]/ /g'
 
 BASE_IMAGE         := golang:1.26-bookworm
 LINT_IMAGE         := golangci/golangci-lint:$(shell cat $(MAKEFILE_DIR).golangci-version)-alpine
+GORELEASER_IMAGE   := goreleaser/goreleaser:v2.20.1
 
 BUILD_ARGS         := --build-arg BUILDKIT_INLINE_CACHE=1
 BUILD_ARGS         += --build-arg BASE_IMAGE=$(BASE_IMAGE)
@@ -81,6 +84,7 @@ $(call check_defined, DEFAULT_BRANCH)
 $(call check_defined, GIT_COMMIT)
 $(call check_defined, GIT_DESCRIBE)
 $(call check_defined, GIT_REPO)
+$(call check_defined, GORELEASER_IMAGE)
 $(call check_defined, LINT_IMAGE)
 $(call check_defined, MAKEFILE_PATH)
 $(call check_defined, MAKEFILE_DIR)
@@ -303,6 +307,26 @@ tag/bump-minor-and-push: .enforce-default-branch .enforce-updated-branch
 tag/bump-patch-and-push: .enforce-default-branch .enforce-updated-branch
 	git tag -a "${SEMVER_PATCH_BUMP}" -m "${SEMVER_PATCH_BUMP}"
 	git push origin "${SEMVER_PATCH_BUMP}"
+
+#########
+# release
+#########
+
+# Dry-run of the GoReleaser pipeline (same command as the CI "build" job).
+# Writes dist/ and completions/ into the repo; publishes nothing.
+# Runs as the invoking user so output isn't root-owned. Because that uid has no
+# usable HOME in the image, HOME/GOCACHE/GOMODCACHE point at /tmp.
+.PHONY: release/snapshot
+release/snapshot:
+	cd $(MAKEFILE_DIR) && docker run --rm \
+		--user $$(id -u):$$(id -g) \
+		-e HOME=/tmp \
+		-e GOCACHE=/tmp/go-build \
+		-e GOMODCACHE=/tmp/go-mod \
+		-v $(MAKEFILE_DIR):/src \
+		-w /src \
+		$(GORELEASER_IMAGE) \
+		release --snapshot --clean --skip=publish
 
 
 #################

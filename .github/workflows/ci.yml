@@ -67,3 +67,26 @@ jobs:
 
       - name: Fail if go.mod or go.sum changed
         run: git diff --exit-code -- go.mod go.sum
+
+  build:
+    name: build (goreleaser snapshot)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Validates .goreleaser.yaml and the build/archive pipeline without
+      # publishing anything (no GITHUB_TOKEN needed).
+      - name: Run GoReleaser snapshot
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: v2.20.1
+          args: release --snapshot --clean --skip=publish
