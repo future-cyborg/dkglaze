@@ -152,7 +152,7 @@ func TestWriteTemplateFile(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		defer os.Remove(outFile) //nolint
+		defer os.Remove(outFile) //nolint:errcheck // best-effort cleanup of a temp file
 
 		content, err := os.ReadFile(outFile) //nolint:gosec // path comes from our own CreateTemp call
 		if err != nil {
@@ -187,7 +187,7 @@ func TestWriteTemplateFile(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		defer os.Remove(outFile) //nolint
+		defer os.Remove(outFile) //nolint:errcheck // best-effort cleanup of a temp file
 
 		if contextDir != subDir {
 			t.Errorf("expected context dir %q, got %q", subDir, contextDir)
@@ -219,14 +219,14 @@ func TestWriteTemplateFile(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		defer os.Remove(outFile) //nolint
+		defer os.Remove(outFile) //nolint:errcheck // best-effort cleanup of a temp file
 
 		f, err := os.Open(outFile) //nolint:gosec // path comes from our own CreateTemp call
 		if err != nil {
 			t.Fatalf("could not open output file: %v", err)
 		}
 
-		defer f.Close() //nolint
+		defer f.Close() //nolint:errcheck // read-only handle; close error cannot affect the assertion
 
 		buf := make([]byte, 64)
 		n, _ := f.Read(buf)

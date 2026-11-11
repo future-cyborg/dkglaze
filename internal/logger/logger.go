@@ -64,20 +64,22 @@ func colorizeIfTTY(text string, color Color, f *os.File) string {
 
 // PrintColor prints text in color to stdout.
 func PrintColor(color Color, text string) {
-	fmt.Println(colorizeIfTTY(text, color, os.Stdout)) //nolint
+	//nolint:forbidigo // logger is the sanctioned print sink
+	fmt.Println(colorizeIfTTY(text, color, os.Stdout))
 }
 
 // PrintColorF prints text in color with formatting to stdout.
 func PrintColorF(color Color, pattern string, text ...any) {
-	fmt.Println(colorizeIfTTY(fmt.Sprintf(pattern, text...), color, os.Stdout)) //nolint
+	//nolint:forbidigo // logger is the sanctioned print sink
+	fmt.Println(colorizeIfTTY(fmt.Sprintf(pattern, text...), color, os.Stdout))
 }
 
 // PrintColorErr prints text in color to stderr.
 func PrintColorErr(color Color, text string) {
-	fmt.Fprintln(os.Stderr, colorizeIfTTY(text, color, os.Stderr)) //nolint
+	fmt.Fprintln(os.Stderr, colorizeIfTTY(text, color, os.Stderr))
 }
 
 // PrintColorFErr prints text in color with formatting to stderr.
 func PrintColorFErr(color Color, pattern string, text ...any) {
-	fmt.Fprintln(os.Stderr, colorizeIfTTY(fmt.Sprintf(pattern, text...), color, os.Stderr)) //nolint
+	fmt.Fprintln(os.Stderr, colorizeIfTTY(fmt.Sprintf(pattern, text...), color, os.Stderr))
 }
