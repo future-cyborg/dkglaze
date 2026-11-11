@@ -8,10 +8,6 @@ THIS_FILE := $(lastword $(MAKEFILE_LIST))
 #   make bin/$(PLATFORM)                  all bin/$(PLATFORM)/ targets
 #   make bin/$(PLATFORM)/$(BUILD)
 #
-#   make docker                           all docker/ targets
-#   make docker/$(PLATFORM)               all docker/$(PLATFORM)/ targets
-#   make docker/$(PLATFORM)/$(BUILD)
-#
 #   make bench-test                       run bench tests
 #   make bench-test/$(GO_PKG)             run bench tests on single package
 #   make unit-test                        run unit tests
@@ -50,13 +46,13 @@ SEMVER_MINOR_BUMP  := $(shell echo '$(GIT_DESCRIBE)' | sed 's/-.*$$//;s/[.]/ /g'
 SEMVER_PATCH_BUMP  := $(shell echo '$(GIT_DESCRIBE)' | sed 's/-.*$$//;s/[.]/ /g' | awk '{ print $$1 "." $$2 "." $$3+1 }')
 
 BASE_IMAGE         := golang:1.26-bookworm
-LINT_IMAGE         := golangci/golangci-lint:v2.12.1-alpine
+LINT_IMAGE         := golangci/golangci-lint:$(shell cat $(MAKEFILE_DIR).golangci-version)-alpine
 
 BUILD_ARGS         := --build-arg BUILDKIT_INLINE_CACHE=1
 BUILD_ARGS         += --build-arg BASE_IMAGE=$(BASE_IMAGE)
 BUILD_ARGS         += --build-arg LINT_IMAGE=$(LINT_IMAGE)
 
-BUILD_FLAGS        := -v
+BUILD_FLAGS        := -v -trimpath
 
 # BUILDS is populated with the name of each directory in cmd/
 BUILDS             := $(foreach P,$(patsubst %/,%,$(dir $(wildcard $(MAKEFILE_DIR)cmd/*/.))),$(notdir $P))
@@ -167,7 +163,7 @@ unit-test: .ensure-dir-report
 	rm -f $(MAKEFILE_DIR)report/unit-test-run* 2>/dev/null
 	cd $(MAKEFILE_DIR) && DOCKER_BUILDKIT=1 docker build \
 		$(BUILD_ARGS) \
-		--build-arg TEST_PATH="$(REPO_NAME)/internal/..." \
+		--build-arg TEST_PATH="$(REPO_NAME)/..." \
 		--build-arg TEST_FLAGS=$(TEST_FLAGS) \
 		--output report/ \
 		--progress plain \
@@ -203,7 +199,7 @@ bench-test: .ensure-dir-report
 	rm -f $(MAKEFILE_DIR)report/bench-test-run* 2>/dev/null
 	cd $(MAKEFILE_DIR) && DOCKER_BUILDKIT=1 docker build \
 		$(BUILD_ARGS) \
-		--build-arg TEST_PATH="$(REPO_NAME)/internal/..." \
+		--build-arg TEST_PATH="$(REPO_NAME)/..." \
 		--build-arg TEST_FLAGS=$(TEST_FLAGS) \
 		--output report/ \
 		--progress plain \
@@ -233,9 +229,6 @@ $(GO_PKGS:%=bench-test/%): bench-test/%: .ensure-dir-report
 .PHONY: bin
 bin: $(PLATFORMS:%=bin/%)
 
-.PHONY: docker
-docker: $(PLATFORMS:%=docker/%)
-
 define makeBin
 PLATFORM_BUILD_TARGETS=$(patsubst %, bin/$1/%,$(BUILDS))
 
@@ -258,37 +251,6 @@ $(BUILDS:%=bin/$1/%): bin/$1/%:
 endef
 
 $(foreach name,$(PLATFORMS),$(eval $(call makeBin,$(name))))
-
-####################
-# Docker - Go builds
-####################
-
-define makeDockerBuild
-PLATFORM_DOCKER_TARGETS=$(patsubst %, docker/$1/%,$(BUILDS))
-
-.PHONY: docker/$1
-docker/$1: $(PLATFORM_DOCKER_TARGETS)
-
-.PHONY: $(BUILDS:%=docker/$1/%)
-$(BUILDS:%=docker/$1/%): docker/$1/%:
-	cd $(MAKEFILE_DIR) && DOCKER_BUILDKIT=1 docker build \
-		$(BUILD_ARGS) \
-		--build-arg BUILD=$$* \
-		--build-arg BUILDKIT_INLINE_CACHE=1 \
-		--build-arg BUILD_FLAGS="$(BUILD_FLAGS)" \
-		--build-arg VERSION="$(GIT_DESCRIBE)" \
-		--label "com.repo.git.commit=$(GIT_COMMIT)" \
-		--label "com.repo.git.describe=$(GIT_DESCRIBE)" \
-		--label "com.repo.git.repo=$(GIT_REPO)" \
-		--platform $1 \
-		--progress plain \
-		--tag "$(PROJECT_NAME)/$$*:$(SEMVER)-$(subst /,-,$1)" \
-		--target build-docker-image \
-		.
-
-endef
-
-$(foreach name,$(PLATFORMS),$(eval $(call makeDockerBuild,$(name))))
 
 ######################
 # Docker - Dockerfiles

@@ -143,9 +143,3 @@ RUN --mount=target=. \
 FROM scratch AS build-bin
 ARG BUILD
 COPY --from=build-bin-runner /out/${BUILD} /
-
-#-------------------------------
-FROM scratch AS build-docker-image
-ARG BUILD
-COPY --from=build-bin-runner /out/${BUILD} /run/service
-ENTRYPOINT ["/run/service"]
