@@ -10,6 +10,8 @@ formatters:
         - standard
         - default
         - prefix(github.com/future-cyborg/dkglaze)
+    gofumpt:
+      extra-rules: false
 
 linters:
   default: none
@@ -69,7 +71,6 @@ linters:
     errorlint:
       errorf: true
     exhaustive:
-      check-generated: false
       default-signifies-exhaustive: false
     forbidigo:
       forbid:
@@ -78,8 +79,6 @@ linters:
     funlen:
       lines: 60
       statements: 40
-    gci:
-      local-prefixes: github.com/future-cyborg/dkglaze
     gocognit:
       min-complexity: 15
     goconst:
@@ -95,8 +94,6 @@ linters:
       capital: false
     godox:
       keywords: []
-    gofumpt:
-      extra-rules: false
     lll:
       line-length: 120
       tab-width: 1
@@ -182,13 +179,14 @@ linters:
         - name: var-naming
         - name: waitgroup-by-value
     wrapcheck:
-      ignoreSigs:
+      ignore-sigs:
         - .Errorf(
         - .WithMessage(
         - .Wrap(
         - .Wrapf(
         - errors.New(
         - errors.Unwrap(
+        - errors.Join(
   exclusions:
     rules:
       - path: _test\.go
@@ -208,6 +206,3 @@ run:
   timeout: 10m
   concurrency: 4
   allow-parallel-runners: true
-
-output:
-  sort-results: true

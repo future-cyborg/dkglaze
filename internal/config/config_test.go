@@ -572,7 +572,7 @@ profiles:
 		t.Fatalf("failed to write config: %v", err)
 	}
 
-	os.Unsetenv("DKGLAZE_DEFINITELY_UNSET_VAR_XYZ") //nolint:errcheck,tenv // intentional unset for test
+	os.Unsetenv("DKGLAZE_DEFINITELY_UNSET_VAR_XYZ") //nolint:errcheck // intentional unset for test
 
 	conf, err := config.LoadConfig()
 	if err != nil {
