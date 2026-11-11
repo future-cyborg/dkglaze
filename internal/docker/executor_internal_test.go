@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -265,11 +266,8 @@ func TestBuildWith_PullWhenRequested(t *testing.T) {
 	})
 }
 
-// BUG(M6): build --dry-run still runs `docker pull` when --pull is given.
-// Fixed in the build-dry-run commit; this pins the current behavior.
-//
-//nolint:godox // pinned characterization of a known bug; inverted by the fix commit
-func TestBuildWith_DryRunPullBug(t *testing.T) {
+// Dry-run must not pull: the build preview has no side effects on the daemon.
+func TestBuildWith_DryRunDoesNotPull(t *testing.T) {
 	setupConfig(t, multiConfig)
 	h := &harness{}
 
@@ -280,26 +278,82 @@ func TestBuildWith_DryRunPullBug(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	assertArgvs(t, h.cmds.argvs, [][]string{{dockerCmd, dockerPullCmd, "ubuntu:22.04"}})
+	if len(h.cmds.argvs) != 0 {
+		t.Errorf("dry-run must not run any process, got %q", h.cmds.argvs)
+	}
 }
 
-// BUG(M6): build --dry-run records intermediate tags that were never created, so
-// the deferred cleanup calls ImageRemove on them and, with a NotFound error from
-// the daemon, dry-run incorrectly returns an error. Fixed in the build-dry-run commit.
-//
-//nolint:godox // pinned characterization of a known bug; inverted by the fix commit
-func TestBuildWith_DryRunCleanupBug(t *testing.T) {
+// Dry-run must not clean up intermediate tags: they were never created, so the
+// daemon would report NotFound and the dry run would fail for no reason.
+func TestBuildWith_DryRunDoesNotRemoveImages(t *testing.T) {
 	setupConfig(t, multiConfig)
 	h := &harness{}
 	notFound := fmt.Errorf("no such image: %w", errdefs.ErrNotFound)
 	h.imgs.removeErr = map[string]error{tagStep0: notFound, tagStep1: notFound}
 
 	err := buildWith(context.Background(), h.newDeps(), &BuildOptions{Image: "ubuntu:22.04", DryRun: true})
-	if err == nil {
-		t.Fatal("expected pinned dry-run cleanup error, got nil")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	assertCalls(t, h.imgs.calls, []string{"remove " + tagStep0, "remove " + tagStep1})
+	if len(h.imgs.calls) != 0 {
+		t.Errorf("dry-run must not touch images, got calls %q", h.imgs.calls)
+	}
+}
+
+// Dry-run prints the exact command each step would run, using placeholders.
+func TestBuildWith_DryRunPrintsPlan(t *testing.T) {
+	setupConfig(t, multiConfig)
+	h := &harness{}
+
+	out := captureStdout(t, func() {
+		err := buildWith(context.Background(), h.newDeps(), &BuildOptions{
+			Image: "ubuntu:22.04", BuildArgs: []string{"--no-cache"}, DryRun: true,
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	wantLines := []string{
+		"Running 'docker build --label com.dkglaze=true -t " + tagStep0 +
+			" -f <a.dockerfile> --build-arg FOO=bar --no-cache <context>'",
+		"Running 'docker build --label com.dkglaze=true -t " + tagStep1 +
+			" -f <b.dockerfile> --build-arg FOO=bar --no-cache <context>'",
+	}
+	for _, line := range wantLines {
+		if !strings.Contains(out, line) {
+			t.Errorf("output missing %q\n got:\n%s", line, out)
+		}
+	}
+}
+
+// captureStdout runs fn and returns what it wrote to os.Stdout.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+
+	orig := os.Stdout
+	os.Stdout = w
+
+	defer func() { os.Stdout = orig }()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe: %v", err)
+	}
+
+	buf, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+
+	return string(buf)
 }
 
 func TestBuildWith_DryRunNeverTagsFinalImage(t *testing.T) {

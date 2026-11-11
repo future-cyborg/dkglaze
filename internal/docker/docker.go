@@ -81,14 +81,17 @@ func buildWith(ctx context.Context, d *deps, opts *BuildOptions) error {
 		return err
 	}
 
+	// A dry run only prints. It must not pull, tag or remove anything.
+	if opts.DryRun {
+		printBuildPlan(plan)
+
+		return nil
+	}
+
 	if opts.Pull {
 		if err := pullImage(ctx, d, opts.Image); err != nil {
 			return err
 		}
-	}
-
-	if opts.DryRun {
-		return dryRunBuild(ctx, d, plan)
 	}
 
 	return executeBuild(ctx, d, plan)
@@ -121,28 +124,12 @@ func executeBuild(ctx context.Context, d *deps, plan *buildPlan) (retErr error) 
 	return tagImage(ctx, d.images, created[len(created)-1], plan.FinalTag)
 }
 
-// dryRunBuild prints each step's command without running anything.
-//
-// It still records the intermediate tags for cleanup, matching the behavior
-// before the dry-run split. Those images were never created, which the
-// dry-run fix commit will correct.
-func dryRunBuild(ctx context.Context, d *deps, plan *buildPlan) (retErr error) {
-	var created []string
-
-	defer func() {
-		if cleanupErr := cleanupTags(ctx, d.images, created); cleanupErr != nil {
-			retErr = errors.Join(retErr, cleanupErr)
-		}
-	}()
-
+// printBuildPlan prints the command each build step would run, using placeholders
+// for the Dockerfile and context.
+func printBuildPlan(plan *buildPlan) {
 	for i := range plan.Steps {
-		step := &plan.Steps[i]
-		logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(step.displayCommand(), " "))
-
-		created = append(created, step.ResultTag)
+		logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(plan.Steps[i].displayCommand(), " "))
 	}
-
-	return nil
 }
 
 func tagImage(ctx context.Context, imgs imageClient, from, to string) error {
