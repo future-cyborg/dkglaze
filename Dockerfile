@@ -62,25 +62,6 @@ FROM scratch AS run-format
 COPY --from=format-runner /out/ /
 
 #-------------------------------
-FROM base AS generate-runner-base
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go install mvdan.cc/gofumpt
-    # PLACEHOLDER - add any tools needed for go generate here
-
-FROM generate-runner-base AS generate-runner
-RUN --mount=target=.,rw \
-    go generate ./internal/... ./pkg/... ./test/... && \
-    find internal pkg test -type f -name '*.go' \
-        | while read -r x ; do \
-            mkdir -p "/out/$(dirname $x)" ; \
-            cp "$x" "/out/$(dirname $x)/" ; \
-        done
-
-FROM scratch AS run-generate
-COPY --from=generate-runner /out/ /
-
-#-------------------------------
 FROM base AS lint-runner
 COPY .golangci.yml .
 RUN --mount=target=.,rw \

@@ -15,7 +15,6 @@ THIS_FILE := $(lastword $(MAKEFILE_LIST))
 #   make unit-test-cover                  open coverage heatmap in browser
 #   make unit-test-cover/$(GO_PKG)        open coverage heatmap in browser, single package
 #
-#   make go/generate                      apply go generators
 #   make go/format                        apply lint fixers
 #   make go/lint                          runs linters
 #   make go/tidy                          update go.mod from source code
@@ -135,15 +134,6 @@ go/format:
 		--output . \
 		--progress plain \
 		--target run-format \
-		.
-
-.PHONY: go/generate
-go/generate:
-	cd $(MAKEFILE_DIR) && DOCKER_BUILDKIT=1 docker build \
-		$(BUILD_ARGS) \
-		--output . \
-		--progress plain \
-		--target run-generate \
 		.
 
 .PHONY: go/lint
