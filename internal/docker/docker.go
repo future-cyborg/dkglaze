@@ -22,8 +22,18 @@ import (
 )
 
 const (
-	dockerCmd    = "docker"
-	dockerRunCmd = "run"
+	dockerCmd       = "docker"
+	dockerRunCmd    = "run"
+	dockerPullCmd   = "pull"
+	dockerBuildCmd  = "build"
+	dockerLabelFlag = "--label"
+	dockerTagFlag   = "-t"
+	dockerFileFlag  = "-f"
+
+	// dkglazeLabel marks images built by this program.
+	dkglazeLabel = "com.dkglaze"
+	// danglingImageTag is how the daemon reports an untagged image.
+	danglingImageTag = "<none>:<none>"
 
 	// localConfigFallbackLabel is used in warning messages when the local
 	// config path itself cannot be determined.
@@ -53,11 +63,23 @@ type templateBuild struct {
 
 // Build builds the user layer on top of the image.
 //
-//nolint:revive,gocognit // flag-parameter is the clearest API here; trustLocalShell adds one parameter
+//nolint:revive // flag-parameter is the clearest API here; trustLocalShell adds one parameter
 func Build(
 	ctx context.Context, image string, buildArgs []string, profile string, pull, dryRun, trustLocalShell bool,
 ) error {
-	if err := validateImageRef(image); err != nil {
+	return withDeps(func(d *deps) error {
+		return buildWith(ctx, d, &BuildOptions{
+			Image: image, BuildArgs: buildArgs, Profile: profile,
+			Pull: pull, DryRun: dryRun, TrustLocalShell: trustLocalShell,
+		})
+	})
+}
+
+// buildWith is the executor behind Build.
+//
+//nolint:revive // mirrors the pre-split Build body; split up in later commits
+func buildWith(ctx context.Context, d *deps, opts *BuildOptions) (retErr error) {
+	if err := validateImageRef(opts.Image); err != nil {
 		return err
 	}
 
@@ -75,11 +97,11 @@ func Build(
 	}
 
 	activeProfile := conf.Defaults.Profile
-	if profile != "" {
-		activeProfile = profile
+	if opts.Profile != "" {
+		activeProfile = opts.Profile
 	}
 
-	resolved, err := conf.ResolveProfile(ctx, activeProfile, trustLocalShell)
+	resolved, err := conf.ResolveProfile(ctx, activeProfile, opts.TrustLocalShell)
 	if err != nil {
 		return errors.Wrap(err)
 	}
@@ -88,34 +110,32 @@ func Build(
 		return errors.Wrap(errNoTemplates)
 	}
 
-	return withDeps(func(d *deps) (retErr error) {
-		if pull {
-			if err := pullImage(ctx, d, image); err != nil {
-				return err
-			}
-		}
-
-		finalTag, intermediateTags, err := buildTemplates(ctx, d, resolved, image, buildArgs, dryRun)
-		// Intermediate tags are temporary stepping-stone images created during the
-		// build pipeline. They are safe to remove on both success and failure: on
-		// success the final image has already been retagged, and on failure the
-		// partial intermediates are no longer needed.
-		defer func() {
-			if cleanupErr := cleanupTags(ctx, d.images, intermediateTags); cleanupErr != nil {
-				retErr = errors.Join(retErr, cleanupErr)
-			}
-		}()
-
-		if err != nil {
+	if opts.Pull {
+		if err := pullImage(ctx, d, opts.Image); err != nil {
 			return err
 		}
+	}
 
-		if dryRun {
-			return nil
+	finalTag, intermediateTags, err := buildTemplates(ctx, d, resolved, opts.Image, opts.BuildArgs, opts.DryRun)
+	// Intermediate tags are temporary stepping-stone images created during the
+	// build pipeline. They are safe to remove on both success and failure: on
+	// success the final image has already been retagged, and on failure the
+	// partial intermediates are no longer needed.
+	defer func() {
+		if cleanupErr := cleanupTags(ctx, d.images, intermediateTags); cleanupErr != nil {
+			retErr = errors.Join(retErr, cleanupErr)
 		}
+	}()
 
-		return tagImage(ctx, d.images, finalTag, newImageName(image, resolved.Suffix))
-	})
+	if err != nil {
+		return err
+	}
+
+	if opts.DryRun {
+		return nil
+	}
+
+	return tagImage(ctx, d.images, finalTag, newImageName(opts.Image, resolved.Suffix))
 }
 
 //nolint:revive // argument-limit: dryRun is a necessary addition to this internal function
@@ -155,11 +175,23 @@ func tagImage(ctx context.Context, imgs imageClient, from, to string) error {
 
 // Run runs the user layer on top of the image. Builds it if it doesn't exist.
 //
-//nolint:revive,gocognit,funlen // flag-parameter is clearest; local-config merging adds branching/length
+//nolint:revive // flag-parameter is clearest; local-config merging adds branching/length
 func Run(
 	ctx context.Context, image string, runArgs []string, profile string, features []string, dryRun, trustLocalShell bool,
 ) error {
-	if err := validateImageRef(image); err != nil {
+	return withDeps(func(d *deps) error {
+		return runWith(ctx, d, &RunOptions{
+			Image: image, RunArgs: runArgs, Profile: profile, Features: features,
+			DryRun: dryRun, TrustLocalShell: trustLocalShell,
+		})
+	})
+}
+
+// runWith is the executor behind Run.
+//
+//nolint:revive,funlen,gocognit // mirrors the pre-split Run body; split up in later commits
+func runWith(ctx context.Context, d *deps, opts *RunOptions) error {
+	if err := validateImageRef(opts.Image); err != nil {
 		return err
 	}
 
@@ -178,20 +210,20 @@ func Run(
 	}
 
 	activeProfile := conf.Defaults.Profile
-	if profile != "" {
-		activeProfile = profile
+	if opts.Profile != "" {
+		activeProfile = opts.Profile
 	}
 
-	warnLocalProvenance(conf, prov, activeProfile, profile != "")
+	warnLocalProvenance(conf, prov, activeProfile, opts.Profile != "")
 
-	resolved, err := conf.ResolveProfileNoArgs(ctx, activeProfile, trustLocalShell)
+	resolved, err := conf.ResolveProfileNoArgs(ctx, activeProfile, opts.TrustLocalShell)
 	if err != nil {
 		return errors.Wrap(err)
 	}
 
 	// Apply any feature-level Run configuration from -f flags
-	for _, featureName := range features {
-		args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(ctx, featureName, trustLocalShell)
+	for _, featureName := range opts.Features {
+		args, mounts, hasBuild, err := conf.ResolveFeatureRunOnly(ctx, featureName, opts.TrustLocalShell)
 		if err != nil {
 			return errors.Wrap(err)
 		}
@@ -212,75 +244,79 @@ func Run(
 		resolved.Run.Mounts = append(resolved.Run.Mounts, mounts...)
 	}
 
-	return withDeps(func(d *deps) error {
-		newImage := newImageName(image, resolved.Suffix)
+	newImage := newImageName(opts.Image, resolved.Suffix)
 
-		command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), runArgs)
-		logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
+	command := runCommand(newImage, resolved.Run.Args, mountFlagsFromResolved(resolved), opts.RunArgs)
+	logger.PrintColorF(logger.Cyan, "Running '%s'", strings.Join(command, " "))
 
-		if dryRun {
-			return nil
-		}
+	if opts.DryRun {
+		return nil
+	}
 
-		exists, err := imageExists(ctx, d.images, newImage)
+	exists, err := imageExists(ctx, d.images, newImage)
+	if err != nil {
+		return errors.Wrap(err)
+	}
+
+	if !exists {
+		logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
+
+		err = buildWith(ctx, d, &BuildOptions{
+			Image: opts.Image, Profile: opts.Profile, TrustLocalShell: opts.TrustLocalShell,
+		})
 		if err != nil {
 			return errors.Wrap(err)
 		}
+	}
 
-		if !exists {
-			logger.PrintColorErr(logger.Yellow, "Image doesn't exist. Building...")
-
-			if err = Build(ctx, image, nil, profile, false, false, trustLocalShell); err != nil {
-				return errors.Wrap(err)
-			}
-		}
-
-		return errors.Wrap(d.execCmd(command))
-	})
+	return errors.Wrap(d.execCmd(command))
 }
 
 func pullImage(ctx context.Context, d *deps, image string) error {
-	command := []string{dockerCmd, "pull", image}
+	command := []string{dockerCmd, dockerPullCmd, image}
 	logger.PrintColorF(logger.Cyan, "Pulling '%s'", image)
 
 	return errors.Wrap(d.runCmd(ctx, command))
 }
 
 // Clean removes all images made by this program.
-//
-//nolint:revive // flag-parameter is the clearest API here
 func Clean(ctx context.Context, dryRun bool) error {
 	return withDeps(func(d *deps) error {
-		imageItems, err := listDkglazeImages(ctx, d.images)
-		if err != nil {
-			return err
-		}
-
-		if dryRun {
-			logger.PrintColor(logger.Cyan, "Would remove:")
-		} else {
-			logger.PrintColor(logger.Cyan, "Removing:")
-		}
-
-		var allErr error
-
-		for item := range imageItems {
-			err = cleanImage(ctx, d.images, &imageItems[item], dryRun)
-			if err != nil {
-				allErr = errors.Join(allErr, err)
-			}
-		}
-
-		if allErr != nil {
-			return errors.Wrap(allErr)
-		}
-
-		return nil
+		return cleanWith(ctx, d, CleanOptions{DryRun: dryRun})
 	})
 }
 
+// cleanWith is the executor behind Clean.
+func cleanWith(ctx context.Context, d *deps, opts CleanOptions) error {
+	imageItems, err := listDkglazeImages(ctx, d.images)
+	if err != nil {
+		return err
+	}
+
+	if opts.DryRun {
+		logger.PrintColor(logger.Cyan, "Would remove:")
+	} else {
+		logger.PrintColor(logger.Cyan, "Removing:")
+	}
+
+	var allErr error
+
+	for item := range imageItems {
+		err = cleanImage(ctx, d.images, &imageItems[item], opts.DryRun)
+		if err != nil {
+			allErr = errors.Join(allErr, err)
+		}
+	}
+
+	if allErr != nil {
+		return errors.Wrap(allErr)
+	}
+
+	return nil
+}
+
 func listDkglazeImages(ctx context.Context, imgs imageClient) ([]imageapi.Summary, error) {
-	f := client.Filters{"label": {"com.dkglaze": true}}
+	f := client.Filters{"label": {dkglazeLabel: true}}
 	imageList, err := imgs.ImageList(ctx, client.ImageListOptions{Filters: f})
 	if err != nil {
 		return nil, errors.Wrap(err)
@@ -294,53 +330,69 @@ func ListNonDkglazeImages(ctx context.Context) ([]string, error) {
 	var tags []string
 
 	err := withDeps(func(d *deps) error {
-		imageList, err := d.images.ImageList(ctx, client.ImageListOptions{})
-		if err != nil {
-			return errors.Wrap(err)
-		}
+		var err error
 
-		for i := range imageList.Items {
-			img := &imageList.Items[i]
+		tags, err = listNonDkglazeWith(ctx, d)
 
-			if img.Labels["com.dkglaze"] != "" {
-				continue
-			}
-
-			for _, tag := range img.RepoTags {
-				if tag == "<none>:<none>" {
-					continue
-				}
-
-				tags = append(tags, tag)
-			}
-		}
-
-		return nil
+		return err
 	})
 
 	return tags, err
 }
 
+// listNonDkglazeWith is the executor behind ListNonDkglazeImages.
+func listNonDkglazeWith(ctx context.Context, d *deps) ([]string, error) {
+	imageList, err := d.images.ImageList(ctx, client.ImageListOptions{})
+	if err != nil {
+		return nil, errors.Wrap(err)
+	}
+
+	var tags []string
+
+	for i := range imageList.Items {
+		img := &imageList.Items[i]
+
+		if img.Labels[dkglazeLabel] != "" {
+			continue
+		}
+
+		for _, tag := range img.RepoTags {
+			if tag == danglingImageTag {
+				continue
+			}
+
+			tags = append(tags, tag)
+		}
+	}
+
+	return tags, nil
+}
+
 // List prints all images managed by dkglaze.
 func List(ctx context.Context) error {
 	return withDeps(func(d *deps) error {
-		images, err := listDkglazeImages(ctx, d.images)
-		if err != nil {
-			return err
-		}
-
-		for i := range images {
-			if len(images[i].RepoTags) > 0 {
-				for _, tag := range images[i].RepoTags {
-					logger.PrintColor(logger.Cyan, tag)
-				}
-			} else {
-				logger.PrintColor(logger.Cyan, images[i].ID)
-			}
-		}
-
-		return nil
+		return listWith(ctx, d)
 	})
+}
+
+// listWith is the executor behind List.
+func listWith(ctx context.Context, d *deps) error {
+	images, err := listDkglazeImages(ctx, d.images)
+	if err != nil {
+		return err
+	}
+
+	for i := range images {
+		if len(images[i].RepoTags) > 0 {
+			for _, tag := range images[i].RepoTags {
+				logger.PrintColor(logger.Cyan, tag)
+			}
+		} else {
+			logger.PrintColor(logger.Cyan, images[i].ID)
+		}
+	}
+
+	return nil
 }
 
 //nolint:revive // flag-parameter is the clearest API here
@@ -365,10 +417,10 @@ func buildTemplate(ctx context.Context, d *deps, t *templateBuild) error {
 	placeholderOrReal := "<" + t.name + ".dockerfile>"
 
 	command := []string{
-		dockerCmd, "build",
-		"--label", "com.dkglaze=true",
-		"-t", t.resultTag,
-		"-f", placeholderOrReal,
+		dockerCmd, dockerBuildCmd,
+		dockerLabelFlag, dkglazeLabel + "=true",
+		dockerTagFlag, t.resultTag,
+		dockerFileFlag, placeholderOrReal,
 	}
 
 	command = append(command, buildArgsFromResolved(t.resolved)...)
