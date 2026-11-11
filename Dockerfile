@@ -89,11 +89,11 @@ RUN --mount=target=.,rw \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
     mkdir -p cmd internal pkg test /out/cmd /out/internal /out/pkg /out/test && \
-    mkdir -p /out && golangci-lint run \
+    mkdir -p /out && { golangci-lint config verify && golangci-lint run \
         ./cmd/... \
         ./internal/... \
-        ./pkg/... \
-        > /out/lint-run ; echo "$?" > /out/lint-run.exitcode
+        ./pkg/... ; } \
+        > /out/lint-run 2>&1 ; echo "$?" > /out/lint-run.exitcode
 
 FROM scratch AS run-linters
 COPY --from=lint-runner /out/ /
