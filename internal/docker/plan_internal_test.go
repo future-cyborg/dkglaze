@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	imageapi "github.com/moby/moby/api/types/image"
+
 	"github.com/future-cyborg/dkglaze/internal/config"
 )
 
@@ -232,5 +234,49 @@ func TestApplyRunFeatures_UnknownFeatureIsError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for unknown feature, got nil")
+	}
+}
+
+func TestImageLabel(t *testing.T) {
+	cases := []struct {
+		name string
+		img  imageapi.Summary
+		want string
+	}{
+		{name: "first tag wins", img: imageapi.Summary{ID: "sha256:a", RepoTags: []string{"x:1", "x:2"}}, want: "x:1"},
+		{name: "untagged falls back to ID", img: imageapi.Summary{ID: "sha256:b"}, want: "sha256:b"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := imageLabel(&tc.img); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestListLines(t *testing.T) {
+	items := []imageapi.Summary{
+		{ID: "sha256:a", RepoTags: []string{"x:1", "x:2"}},
+		{ID: "sha256:b"},
+	}
+
+	want := []string{"x:1", "x:2", "sha256:b"}
+	if got := listLines(items); !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestNonDkglazeTags(t *testing.T) {
+	items := []imageapi.Summary{
+		{ID: "1", RepoTags: []string{"ubuntu:22.04", danglingImageTag}},
+		{ID: "2", RepoTags: []string{"mine:1"}, Labels: map[string]string{dkglazeLabel: "true"}},
+		{ID: "3", RepoTags: []string{"alpine:3"}},
+	}
+
+	want := []string{"ubuntu:22.04", "alpine:3"}
+	if got := nonDkglazeTags(items); !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 
+	imageapi "github.com/moby/moby/api/types/image"
+
 	"github.com/future-cyborg/dkglaze/internal/config"
 	"github.com/future-cyborg/dkglaze/internal/errors"
 )
@@ -157,4 +159,53 @@ func localProvenanceWarnings(
 	}
 
 	return warnings
+}
+
+// imageLabel names an image for output: its first tag, or its ID when untagged.
+func imageLabel(img *imageapi.Summary) string {
+	if len(img.RepoTags) > 0 {
+		return img.RepoTags[0]
+	}
+
+	return img.ID
+}
+
+// listLines returns one output line per tag of each image, or the image ID
+// for images without tags.
+func listLines(items []imageapi.Summary) []string {
+	var lines []string
+
+	for i := range items {
+		if len(items[i].RepoTags) > 0 {
+			lines = append(lines, items[i].RepoTags...)
+		} else {
+			lines = append(lines, items[i].ID)
+		}
+	}
+
+	return lines
+}
+
+// nonDkglazeTags returns every real tag of the images that dkglaze does not
+// manage. Untagged (dangling) references are skipped.
+func nonDkglazeTags(items []imageapi.Summary) []string {
+	var tags []string
+
+	for i := range items {
+		img := &items[i]
+
+		if img.Labels[dkglazeLabel] != "" {
+			continue
+		}
+
+		for _, tag := range img.RepoTags {
+			if tag == danglingImageTag {
+				continue
+			}
+
+			tags = append(tags, tag)
+		}
+	}
+
+	return tags
 }
