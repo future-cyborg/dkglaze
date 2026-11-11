@@ -62,16 +62,9 @@ type templateBuild struct {
 }
 
 // Build builds the user layer on top of the image.
-//
-//nolint:revive // flag-parameter is the clearest API here; trustLocalShell adds one parameter
-func Build(
-	ctx context.Context, image string, buildArgs []string, profile string, pull, dryRun, trustLocalShell bool,
-) error {
+func Build(ctx context.Context, opts *BuildOptions) error {
 	return withDeps(func(d *deps) error {
-		return buildWith(ctx, d, &BuildOptions{
-			Image: image, BuildArgs: buildArgs, Profile: profile,
-			Pull: pull, DryRun: dryRun, TrustLocalShell: trustLocalShell,
-		})
+		return buildWith(ctx, d, opts)
 	})
 }
 
@@ -174,16 +167,9 @@ func tagImage(ctx context.Context, imgs imageClient, from, to string) error {
 }
 
 // Run runs the user layer on top of the image. Builds it if it doesn't exist.
-//
-//nolint:revive // flag-parameter is clearest; local-config merging adds branching/length
-func Run(
-	ctx context.Context, image string, runArgs []string, profile string, features []string, dryRun, trustLocalShell bool,
-) error {
+func Run(ctx context.Context, opts *RunOptions) error {
 	return withDeps(func(d *deps) error {
-		return runWith(ctx, d, &RunOptions{
-			Image: image, RunArgs: runArgs, Profile: profile, Features: features,
-			DryRun: dryRun, TrustLocalShell: trustLocalShell,
-		})
+		return runWith(ctx, d, opts)
 	})
 }
 
@@ -280,9 +266,9 @@ func pullImage(ctx context.Context, d *deps, image string) error {
 }
 
 // Clean removes all images made by this program.
-func Clean(ctx context.Context, dryRun bool) error {
+func Clean(ctx context.Context, opts CleanOptions) error {
 	return withDeps(func(d *deps) error {
-		return cleanWith(ctx, d, CleanOptions{DryRun: dryRun})
+		return cleanWith(ctx, d, opts)
 	})
 }
 

@@ -40,9 +40,14 @@ func (*BuildCmd) Help() string {
 }
 
 func (cmd *BuildCmd) Run(ctx *Context) error {
-	return errors.Wrap(docker.Build(
-		ctx.Ctx, cmd.Image, cmd.BuildArgs, cmd.Profile, cmd.Pull, cmd.DryRun, cmd.TrustLocalShell,
-	))
+	return errors.Wrap(docker.Build(ctx.Ctx, &docker.BuildOptions{
+		Image:           cmd.Image,
+		BuildArgs:       cmd.BuildArgs,
+		Profile:         cmd.Profile,
+		Pull:            cmd.Pull,
+		DryRun:          cmd.DryRun,
+		TrustLocalShell: cmd.TrustLocalShell,
+	}))
 }
 
 // RunCmd is the run subcommand.
@@ -60,9 +65,14 @@ func (*RunCmd) Help() string {
 }
 
 func (cmd *RunCmd) Run(ctx *Context) error {
-	return errors.Wrap(docker.Run(
-		ctx.Ctx, cmd.Image, cmd.RunArgs, cmd.Profile, cmd.Features, cmd.DryRun, cmd.TrustLocalShell,
-	))
+	return errors.Wrap(docker.Run(ctx.Ctx, &docker.RunOptions{
+		Image:           cmd.Image,
+		RunArgs:         cmd.RunArgs,
+		Profile:         cmd.Profile,
+		Features:        cmd.Features,
+		DryRun:          cmd.DryRun,
+		TrustLocalShell: cmd.TrustLocalShell,
+	}))
 }
 
 // CleanCmd is the clean subcommand.
@@ -71,7 +81,7 @@ type CleanCmd struct {
 }
 
 func (cmd *CleanCmd) Run(ctx *Context) error {
-	return errors.Wrap(docker.Clean(ctx.Ctx, cmd.DryRun))
+	return errors.Wrap(docker.Clean(ctx.Ctx, docker.CleanOptions{DryRun: cmd.DryRun}))
 }
 
 // ListCmd is the list subcommand.
