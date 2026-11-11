@@ -22,12 +22,13 @@ var errFake = errors.New("fake failure")
 // scripting results. exists drives ImageInspect; NotFound is reported the way
 // the real client reports it (errdefs.ErrNotFound).
 type fakeImages struct {
-	calls     []string
-	exists    map[string]bool
-	items     []imageapi.Summary
-	listErr   error
-	tagErr    error
-	removeErr map[string]error
+	calls      []string
+	exists     map[string]bool
+	items      []imageapi.Summary
+	listErr    error
+	inspectErr error
+	tagErr     error
+	removeErr  map[string]error
 }
 
 func (f *fakeImages) ImageTag(_ context.Context, o client.ImageTagOptions) (client.ImageTagResult, error) {
@@ -54,6 +55,10 @@ func (f *fakeImages) ImageInspect(
 	_ context.Context, id string, _ ...client.ImageInspectOption,
 ) (client.ImageInspectResult, error) {
 	f.calls = append(f.calls, "inspect "+id)
+	if f.inspectErr != nil {
+		return client.ImageInspectResult{}, f.inspectErr
+	}
+
 	if !f.exists[id] {
 		return client.ImageInspectResult{}, fmt.Errorf("no such image %s: %w", id, errdefs.ErrNotFound)
 	}
@@ -557,4 +562,84 @@ func TestListWith_ListsWithoutError(t *testing.T) {
 	}
 
 	assertCalls(t, h.imgs.calls, []string{"list"})
+}
+
+func TestBuildWith_InvalidImageRefIsRejected(t *testing.T) {
+	setupConfig(t, multiConfig)
+	h := &harness{}
+
+	err := buildWith(context.Background(), h.newDeps(), &BuildOptions{Image: "Bad Image"})
+	if !errors.Is(err, errInvalidImageRef) {
+		t.Fatalf("want errInvalidImageRef, got %v", err)
+	}
+
+	if len(h.cmds.argvs) != 0 || len(h.imgs.calls) != 0 {
+		t.Errorf("nothing should run for an invalid image: cmds=%q images=%q", h.cmds.argvs, h.imgs.calls)
+	}
+}
+
+func TestBuildWith_PullFailureStopsBeforeBuilding(t *testing.T) {
+	setupConfig(t, multiConfig)
+	h := &harness{}
+	h.cmds.failAt = map[int]error{0: errFake}
+
+	err := buildWith(context.Background(), h.newDeps(), &BuildOptions{Image: "ubuntu:22.04", Pull: true})
+	if !errors.Is(err, errFake) {
+		t.Fatalf("want errFake, got %v", err)
+	}
+
+	if len(h.cmds.argvs) != 1 {
+		t.Errorf("only the pull should run after a pull failure, got %q", h.cmds.argvs)
+	}
+}
+
+func TestBuildWith_BrokenConfigIsReturned(t *testing.T) {
+	setupConfig(t, "defaults: [\n")
+	h := &harness{}
+
+	if err := buildWith(context.Background(), h.newDeps(), &BuildOptions{Image: "ubuntu:22.04"}); err == nil {
+		t.Fatal("expected error for unparseable config, got nil")
+	}
+}
+
+func TestRunWith_InvalidImageRefIsRejected(t *testing.T) {
+	setupConfig(t, multiConfig)
+	h := &harness{}
+
+	err := runWith(context.Background(), h.newDeps(), &RunOptions{Image: "Bad Image"})
+	if !errors.Is(err, errInvalidImageRef) {
+		t.Fatalf("want errInvalidImageRef, got %v", err)
+	}
+}
+
+func TestRunWith_InspectFailureIsReturned(t *testing.T) {
+	setupConfig(t, multiConfig)
+	h := &harness{}
+	h.imgs.inspectErr = errFake
+
+	err := runWith(context.Background(), h.newDeps(), &RunOptions{Image: "ubuntu:22.04"})
+	if !errors.Is(err, errFake) {
+		t.Fatalf("want errFake, got %v", err)
+	}
+
+	if len(h.execs.argvs) != 0 {
+		t.Errorf("exec must not run when the image check fails: %q", h.execs.argvs)
+	}
+}
+
+func TestListFailuresAreReturned(t *testing.T) {
+	h := &harness{}
+	h.imgs.listErr = errFake
+
+	if err := cleanWith(context.Background(), h.newDeps(), CleanOptions{}); !errors.Is(err, errFake) {
+		t.Errorf("cleanWith: want errFake, got %v", err)
+	}
+
+	if err := listWith(context.Background(), h.newDeps()); !errors.Is(err, errFake) {
+		t.Errorf("listWith: want errFake, got %v", err)
+	}
+
+	if _, err := listNonDkglazeWith(context.Background(), h.newDeps()); !errors.Is(err, errFake) {
+		t.Errorf("listNonDkglazeWith: want errFake, got %v", err)
+	}
 }
