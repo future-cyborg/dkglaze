@@ -9,7 +9,7 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/future-cyborg/ldocker)
+        - prefix(github.com/future-cyborg/dkglaze)
 
 linters:
   default: none
@@ -79,7 +79,7 @@ linters:
       lines: 60
       statements: 40
     gci:
-      local-prefixes: github.com/future-cyborg/ldocker
+      local-prefixes: github.com/future-cyborg/dkglaze
     gocognit:
       min-complexity: 15
     goconst:

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/future-cyborg/ldocker/internal/config"
+	"github.com/future-cyborg/dkglaze/internal/config"
 )
 
 func TestGetConfigPaths(t *testing.T) {
@@ -42,12 +42,12 @@ func TestGetConfigPaths(t *testing.T) {
 func withTempConfigDir(t *testing.T) func() {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "ldocker-test-*")
+	tmpDir, err := os.MkdirTemp("", "dkglaze-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	t.Setenv("LDOCKER_CONFIG_DIR", tmpDir)
+	t.Setenv("DKGLAZE_CONFIG_DIR", tmpDir)
 
 	return func() {
 		_ = os.RemoveAll(tmpDir)
@@ -562,7 +562,7 @@ features:
     run:
       args: []
       mounts:
-        - $LDOCKER_DEFINITELY_UNSET_VAR_XYZ:/container
+        - $DKGLAZE_DEFINITELY_UNSET_VAR_XYZ:/container
 profiles:
   default:
     features:
@@ -572,7 +572,7 @@ profiles:
 		t.Fatalf("failed to write config: %v", err)
 	}
 
-	os.Unsetenv("LDOCKER_DEFINITELY_UNSET_VAR_XYZ") //nolint:errcheck,tenv // intentional unset for test
+	os.Unsetenv("DKGLAZE_DEFINITELY_UNSET_VAR_XYZ") //nolint:errcheck,tenv // intentional unset for test
 
 	conf, err := config.LoadConfig()
 	if err != nil {
@@ -741,13 +741,13 @@ func TestExpandRunArgs_EnvVarIsExpanded(t *testing.T) {
 	cleanup := withTempConfigDir(t)
 	defer cleanup()
 
-	t.Setenv("LDOCKER_TEST_WORKDIR", "/some/path")
+	t.Setenv("DKGLAZE_TEST_WORKDIR", "/some/path")
 
 	if err := config.InitConfig(); err != nil {
 		t.Fatalf("init error: %v", err)
 	}
 
-	resolved, err := writeAndResolve(t, configWithRunArgs("        - \"--workdir=$LDOCKER_TEST_WORKDIR\""))
+	resolved, err := writeAndResolve(t, configWithRunArgs("        - \"--workdir=$DKGLAZE_TEST_WORKDIR\""))
 	if err != nil {
 		t.Fatalf("resolve error: %v", err)
 	}
@@ -831,7 +831,7 @@ func TestExpandRunArgs_FailedSubshellReturnsError(t *testing.T) {
 		t.Fatalf("init error: %v", err)
 	}
 
-	arg := configWithRunArgs("        - \"--arg=${LDOCKER_UNSET_VAR_XYZ?undefined variable}\"")
+	arg := configWithRunArgs("        - \"--arg=${DKGLAZE_UNSET_VAR_XYZ?undefined variable}\"")
 	resolved, err := writeAndResolve(t, arg)
 	if err == nil {
 		t.Errorf("expected error for failed subshell, got resolved: %v", resolved)
@@ -1047,14 +1047,14 @@ profiles:
 func TestGetLocalConfigPath_DefaultsToCwd(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
-	t.Setenv("LDOCKER_LOCAL_CONFIG", "")
+	t.Setenv("DKGLAZE_LOCAL_CONFIG", "")
 
 	path, explicit, err := config.GetLocalConfigPath()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expectedPath := filepath.Join(tmpDir, ".ldocker.yml")
+	expectedPath := filepath.Join(tmpDir, ".dkglaze.yml")
 	if path != expectedPath {
 		t.Errorf("expected path %q, got %q", expectedPath, path)
 	}
@@ -1066,7 +1066,7 @@ func TestGetLocalConfigPath_DefaultsToCwd(t *testing.T) {
 
 func TestGetLocalConfigPath_UsesEnvOverride(t *testing.T) {
 	envPath := "/some/explicit/path.yml"
-	t.Setenv("LDOCKER_LOCAL_CONFIG", envPath)
+	t.Setenv("DKGLAZE_LOCAL_CONFIG", envPath)
 
 	path, explicit, err := config.GetLocalConfigPath()
 	if err != nil {
@@ -1085,7 +1085,7 @@ func TestGetLocalConfigPath_UsesEnvOverride(t *testing.T) {
 func TestLoadLocalConfig_NoFileReturnsEmptyConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
-	t.Setenv("LDOCKER_LOCAL_CONFIG", "")
+	t.Setenv("DKGLAZE_LOCAL_CONFIG", "")
 
 	local, err := config.LoadLocalConfig()
 	if err != nil {
@@ -1108,7 +1108,7 @@ func TestLoadLocalConfig_NoFileReturnsEmptyConfig(t *testing.T) {
 func TestLoadLocalConfig_ExplicitEnvPathMissingReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	nonexistentPath := filepath.Join(tmpDir, "does-not-exist.yml")
-	t.Setenv("LDOCKER_LOCAL_CONFIG", nonexistentPath)
+	t.Setenv("DKGLAZE_LOCAL_CONFIG", nonexistentPath)
 
 	local, err := config.LoadLocalConfig()
 	if err == nil {
@@ -1125,7 +1125,7 @@ func TestLoadLocalConfig_MalformedYAMLReturnsError(t *testing.T) {
 		t.Fatalf("failed to write malformed YAML: %v", err)
 	}
 
-	t.Setenv("LDOCKER_LOCAL_CONFIG", configPath)
+	t.Setenv("DKGLAZE_LOCAL_CONFIG", configPath)
 
 	local, err := config.LoadLocalConfig()
 	if err == nil {
@@ -1148,7 +1148,7 @@ func TestLoadLocalConfig_BuildKeyUnderFeatureReturnsError(t *testing.T) {
 		t.Fatalf("failed to write YAML: %v", err)
 	}
 
-	t.Setenv("LDOCKER_LOCAL_CONFIG", configPath)
+	t.Setenv("DKGLAZE_LOCAL_CONFIG", configPath)
 
 	local, err := config.LoadLocalConfig()
 	if err == nil {
@@ -1177,7 +1177,7 @@ profiles:
 		t.Fatalf("failed to write YAML: %v", err)
 	}
 
-	t.Setenv("LDOCKER_LOCAL_CONFIG", configPath)
+	t.Setenv("DKGLAZE_LOCAL_CONFIG", configPath)
 
 	local, err := config.LoadLocalConfig()
 	if err != nil {
@@ -1257,7 +1257,7 @@ profiles:
 		t.Fatalf("failed to write YAML: %v", err)
 	}
 
-	t.Setenv("LDOCKER_LOCAL_CONFIG", configPath)
+	t.Setenv("DKGLAZE_LOCAL_CONFIG", configPath)
 
 	local, err := config.LoadLocalConfig()
 	if err != nil {
@@ -1945,16 +1945,16 @@ func newLocalShellTestConfig() *config.Config {
 }
 
 // loadLocalConfigForTest writes yml to a project-local config file, points
-// LDOCKER_LOCAL_CONFIG at it, and parses it via LoadLocalConfig.
+// DKGLAZE_LOCAL_CONFIG at it, and parses it via LoadLocalConfig.
 func loadLocalConfigForTest(t *testing.T, yml string) *config.LocalConfig {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), ".ldocker.yml")
+	path := filepath.Join(t.TempDir(), ".dkglaze.yml")
 	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
 		t.Fatalf("failed to write local config: %v", err)
 	}
 
-	t.Setenv("LDOCKER_LOCAL_CONFIG", path)
+	t.Setenv("DKGLAZE_LOCAL_CONFIG", path)
 
 	local, err := config.LoadLocalConfig()
 	if err != nil {

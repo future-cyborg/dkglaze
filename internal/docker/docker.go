@@ -18,9 +18,9 @@ import (
 	imageapi "github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 
-	"github.com/future-cyborg/ldocker/internal/config"
-	"github.com/future-cyborg/ldocker/internal/errors"
-	"github.com/future-cyborg/ldocker/internal/logger"
+	"github.com/future-cyborg/dkglaze/internal/config"
+	"github.com/future-cyborg/dkglaze/internal/errors"
+	"github.com/future-cyborg/dkglaze/internal/logger"
 )
 
 const (
@@ -293,7 +293,7 @@ func pullImage(ctx context.Context, image string) error {
 //nolint:revive // flag-parameter is the clearest API here
 func Clean(ctx context.Context, dryRun bool) error {
 	return withDockerClient(func(cli *client.Client) error {
-		imageItems, err := listLdockerImages(ctx, cli)
+		imageItems, err := listDkglazeImages(ctx, cli)
 		if err != nil {
 			return err
 		}
@@ -321,8 +321,8 @@ func Clean(ctx context.Context, dryRun bool) error {
 	})
 }
 
-func listLdockerImages(ctx context.Context, cli *client.Client) ([]imageapi.Summary, error) {
-	f := client.Filters{"label": {"com.ldocker": true}}
+func listDkglazeImages(ctx context.Context, cli *client.Client) ([]imageapi.Summary, error) {
+	f := client.Filters{"label": {"com.dkglaze": true}}
 	imageList, err := cli.ImageList(ctx, client.ImageListOptions{Filters: f})
 	if err != nil {
 		return nil, errors.Wrap(err)
@@ -331,8 +331,8 @@ func listLdockerImages(ctx context.Context, cli *client.Client) ([]imageapi.Summ
 	return imageList.Items, nil
 }
 
-// ListNonLdockerImages returns tags of all local Docker images not managed by ldocker.
-func ListNonLdockerImages(ctx context.Context) ([]string, error) {
+// ListNonDkglazeImages returns tags of all local Docker images not managed by dkglaze.
+func ListNonDkglazeImages(ctx context.Context) ([]string, error) {
 	var tags []string
 
 	err := withDockerClient(func(cli *client.Client) error {
@@ -344,7 +344,7 @@ func ListNonLdockerImages(ctx context.Context) ([]string, error) {
 		for i := range imageList.Items {
 			img := &imageList.Items[i]
 
-			if img.Labels["com.ldocker"] != "" {
+			if img.Labels["com.dkglaze"] != "" {
 				continue
 			}
 
@@ -363,10 +363,10 @@ func ListNonLdockerImages(ctx context.Context) ([]string, error) {
 	return tags, err
 }
 
-// List prints all images managed by ldocker.
+// List prints all images managed by dkglaze.
 func List(ctx context.Context) error {
 	return withDockerClient(func(cli *client.Client) error {
-		images, err := listLdockerImages(ctx, cli)
+		images, err := listDkglazeImages(ctx, cli)
 		if err != nil {
 			return err
 		}
@@ -408,7 +408,7 @@ func buildTemplate(ctx context.Context, t *templateBuild) error {
 
 	command := []string{
 		dockerCmd, "build",
-		"--label", "com.ldocker=true",
+		"--label", "com.dkglaze=true",
 		"-t", t.resultTag,
 		"-f", placeholderOrReal,
 	}

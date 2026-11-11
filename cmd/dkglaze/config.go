@@ -7,9 +7,9 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/future-cyborg/ldocker/internal/config"
-	"github.com/future-cyborg/ldocker/internal/errors"
-	"github.com/future-cyborg/ldocker/internal/logger"
+	"github.com/future-cyborg/dkglaze/internal/config"
+	"github.com/future-cyborg/dkglaze/internal/errors"
+	"github.com/future-cyborg/dkglaze/internal/logger"
 )
 
 // ConfigInitCmd initializes the config directory and default config file.

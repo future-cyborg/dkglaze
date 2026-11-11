@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/future-cyborg/ldocker/internal/errors"
+	"github.com/future-cyborg/dkglaze/internal/errors"
 )
 
 var (

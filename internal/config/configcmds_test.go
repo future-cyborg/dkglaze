@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/future-cyborg/ldocker/internal/config"
+	"github.com/future-cyborg/dkglaze/internal/config"
 )
 
 const multiProfileConfig = `defaults:

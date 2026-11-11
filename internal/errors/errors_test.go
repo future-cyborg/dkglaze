@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/future-cyborg/ldocker/internal/errors"
+	"github.com/future-cyborg/dkglaze/internal/errors"
 )
 
 var (

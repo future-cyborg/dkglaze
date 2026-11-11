@@ -7,7 +7,7 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/future-cyborg/ldocker/internal/errors"
+	"github.com/future-cyborg/dkglaze/internal/errors"
 )
 
 const posComplImages = "images"

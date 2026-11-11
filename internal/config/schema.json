@@ -1,6 +1,6 @@
 {
-    "title": "ldocker config",
-    "description": "Configuration for ldocker",
+    "title": "dkglaze config",
+    "description": "Configuration for dkglaze",
     "type": "object",
     "properties":
     {

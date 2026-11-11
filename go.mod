@@ -1,4 +1,4 @@
-module github.com/future-cyborg/ldocker
+module github.com/future-cyborg/dkglaze
 
 go 1.26
 
