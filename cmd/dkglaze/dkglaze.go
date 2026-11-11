@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"syscall"
 
@@ -168,18 +169,38 @@ func listConfigNames(selector func(*config.Config) map[string]interface{}) error
 	return nil
 }
 
+// version is the dkglaze version string. It is set at build time via
+// -ldflags "-X main.version=<version>"; when left as "dev" resolveVersion
+// falls back to the module build info.
+var version = "dev"
+
+// resolveVersion returns the injected version, or the module version recorded
+// in the Go build info (e.g. for `go install module@vX.Y.Z`) when not injected.
+func resolveVersion() string {
+	if version != "dev" {
+		return version
+	}
+
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+
+	return version
+}
+
 // Cli is the root CLI struct.
 type Cli struct {
-	Config       ConfigCmd       `cmd:"" help:"Manage configuration"`
-	Build        BuildCmd        `cmd:"" help:"Build user layer over docker image"`
-	Run          RunCmd          `cmd:"" help:"Run user layer docker image"`
-	Clean        CleanCmd        `cmd:"" help:"Remove all images made by this program"`
-	List         ListCmd         `cmd:"" help:"List all images made by this program"`
-	Completion   CompletionCmd   `cmd:"" help:"Print shell completion script"`
-	ListImages   listImagesCmd   `cmd:"" name:"_list-images" hidden:""`
-	ListProfiles listProfilesCmd `cmd:"" name:"_list-profiles" hidden:""`
-	ListFeatures listFeaturesCmd `cmd:"" name:"_list-features" hidden:""`
-	Verbose      bool            `help:"Enable debug mode."`
+	Config       ConfigCmd        `cmd:"" help:"Manage configuration"`
+	Build        BuildCmd         `cmd:"" help:"Build user layer over docker image"`
+	Run          RunCmd           `cmd:"" help:"Run user layer docker image"`
+	Clean        CleanCmd         `cmd:"" help:"Remove all images made by this program"`
+	List         ListCmd          `cmd:"" help:"List all images made by this program"`
+	Completion   CompletionCmd    `cmd:"" help:"Print shell completion script"`
+	ListImages   listImagesCmd    `cmd:"" name:"_list-images" hidden:""`
+	ListProfiles listProfilesCmd  `cmd:"" name:"_list-profiles" hidden:""`
+	ListFeatures listFeaturesCmd  `cmd:"" name:"_list-features" hidden:""`
+	Verbose      bool             `help:"Enable debug mode."`
+	Version      kong.VersionFlag `name:"version" short:"v" help:"Print version and exit."`
 }
 
 func main() {
@@ -187,7 +208,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
-	kongCtx := kong.Parse(&cli)
+	kongCtx := kong.Parse(&cli, kong.Vars{"version": resolveVersion()})
 	err := kongCtx.Run(&Context{Ctx: ctx, Verbose: cli.Verbose})
 	stop()
 

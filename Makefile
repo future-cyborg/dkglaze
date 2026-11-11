@@ -248,6 +248,7 @@ $(BUILDS:%=bin/$1/%): bin/$1/%:
 		$(BUILD_ARGS) \
 		--build-arg BUILD=$$* \
 		--build-arg BUILD_FLAGS="$(BUILD_FLAGS)" \
+		--build-arg VERSION="$(GIT_DESCRIBE)" \
 		--output bin/$1 \
 		--platform $1 \
 		--progress plain \
@@ -275,6 +276,7 @@ $(BUILDS:%=docker/$1/%): docker/$1/%:
 		--build-arg BUILD=$$* \
 		--build-arg BUILDKIT_INLINE_CACHE=1 \
 		--build-arg BUILD_FLAGS="$(BUILD_FLAGS)" \
+		--build-arg VERSION="$(GIT_DESCRIBE)" \
 		--label "com.repo.git.commit=$(GIT_COMMIT)" \
 		--label "com.repo.git.describe=$(GIT_DESCRIBE)" \
 		--label "com.repo.git.repo=$(GIT_REPO)" \
