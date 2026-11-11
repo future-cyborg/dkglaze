@@ -134,10 +134,11 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG BUILD
 ARG BUILD_FLAGS
+ARG VERSION
 RUN --mount=target=. \
     --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build ${BUILD_FLAGS} -o /out/${BUILD} ./cmd/${BUILD}
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build ${BUILD_FLAGS} -ldflags "-X main.version=${VERSION}" -o /out/${BUILD} ./cmd/${BUILD}
 
 FROM scratch AS build-bin
 ARG BUILD
