@@ -340,11 +340,18 @@ func cleanWith(ctx context.Context, d *deps, opts CleanOptions) error {
 
 	var allErr error
 
-	for item := range imageItems {
-		err = cleanImage(ctx, d.images, &imageItems[item], opts.DryRun)
-		if err != nil {
-			allErr = errors.Join(allErr, err)
+	for i := range imageItems {
+		img := &imageItems[i]
+
+		if !opts.DryRun {
+			if _, err := d.images.ImageRemove(ctx, img.ID, client.ImageRemoveOptions{}); err != nil {
+				allErr = errors.Join(allErr, errors.Wrap(err))
+
+				continue
+			}
 		}
+
+		logger.PrintColor(logger.Cyan, imageLabel(img))
 	}
 
 	if allErr != nil {
@@ -386,25 +393,7 @@ func listNonDkglazeWith(ctx context.Context, d *deps) ([]string, error) {
 		return nil, errors.Wrap(err)
 	}
 
-	var tags []string
-
-	for i := range imageList.Items {
-		img := &imageList.Items[i]
-
-		if img.Labels[dkglazeLabel] != "" {
-			continue
-		}
-
-		for _, tag := range img.RepoTags {
-			if tag == danglingImageTag {
-				continue
-			}
-
-			tags = append(tags, tag)
-		}
-	}
-
-	return tags, nil
+	return nonDkglazeTags(imageList.Items), nil
 }
 
 // List prints all images managed by dkglaze.
@@ -421,32 +410,8 @@ func listWith(ctx context.Context, d *deps) error {
 		return err
 	}
 
-	for i := range images {
-		if len(images[i].RepoTags) > 0 {
-			for _, tag := range images[i].RepoTags {
-				logger.PrintColor(logger.Cyan, tag)
-			}
-		} else {
-			logger.PrintColor(logger.Cyan, images[i].ID)
-		}
-	}
-
-	return nil
-}
-
-//nolint:revive // flag-parameter is the clearest API here
-func cleanImage(ctx context.Context, imgs imageClient, image *imageapi.Summary, dryRun bool) error {
-	if !dryRun {
-		_, err := imgs.ImageRemove(ctx, image.ID, client.ImageRemoveOptions{})
-		if err != nil {
-			return errors.Wrap(err)
-		}
-	}
-
-	if len(image.RepoTags) > 0 {
-		logger.PrintColor(logger.Cyan, image.RepoTags[0])
-	} else {
-		logger.PrintColor(logger.Cyan, image.ID)
+	for _, line := range listLines(images) {
+		logger.PrintColor(logger.Cyan, line)
 	}
 
 	return nil
